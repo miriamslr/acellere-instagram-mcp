@@ -1,95 +1,23 @@
 name: Release & Publish
 
+# Disabled by default in the Acellere fork.
+# Publishing must be an explicit, manual action after package identity,
+# registry target, versioning, and release credentials are reviewed.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
-      packages: write
-    outputs:
-      released: ${{ steps.version.outputs.released }}
-      tag: ${{ steps.version.outputs.tag }}
+      contents: read
 
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/version-sync
-
-      - name: Check version
-        id: version
+      - name: Release disabled in Acellere fork
         run: |
-          version=$(node -p "require('./package.json').version")
-          tag="v${version}"
-          if gh release view "$tag" &>/dev/null; then
-            echo "GitHub release ${tag} already exists; skipping publish."
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          elif npm view "@exileum/meta-mcp@${version}" version --registry https://registry.npmjs.org &>/dev/null; then
-            echo "npm @exileum/meta-mcp@${version} already published; skipping."
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$tag" >> "$GITHUB_OUTPUT"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create release
-        if: steps.version.outputs.released == 'true'
-        run: gh release create "${{ steps.version.outputs.tag }}" --title "${{ steps.version.outputs.tag }}" --generate-notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Node
-        if: steps.version.outputs.released == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install & build
-        if: steps.version.outputs.released == 'true'
-        run: npm ci && npm run build
-
-      - name: Publish to npm
-        if: steps.version.outputs.released == 'true'
-        run: npm publish --provenance --access public
-
-      - name: Verify npm publish
-        if: steps.version.outputs.released == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          for attempt in 1 2 3; do
-            sleep 15
-            if npm view "@exileum/meta-mcp@${VERSION}" version --registry https://registry.npmjs.org; then
-              echo "Package verified on npm"
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Attempt $attempt: package not yet visible on npm, retrying..."
-            fi
-          done
-          echo "::error::Package @exileum/meta-mcp@${VERSION} did not appear on npm after 3 attempts"
-          exit 1
-
-      - name: Setup Node for GitHub Packages
-        if: steps.version.outputs.released == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          registry-url: 'https://npm.pkg.github.com'
-
-      - name: Publish to GitHub Packages
-        if: steps.version.outputs.released == 'true'
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Release publishing is intentionally disabled in the Acellere fork."
+          echo "Review package identity, registry targets, versioning, and credentials before re-enabling publication."
