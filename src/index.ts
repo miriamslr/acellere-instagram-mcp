@@ -11,7 +11,7 @@ import {
   parseHttpTransportConfig,
   startHttpTransport,
 } from "./http-transport.js";
-import { MetaClient } from "./services/meta-client.js";
+import { AcellereMetaClient } from "./services/acellere-meta-client.js";
 import { registerAll } from "./register-all.js";
 import { setupFatalErrorHandlers, setupShutdownHandlers } from "./shutdown.js";
 import { createMcpLogger } from "./utils/logger.js";
@@ -20,7 +20,9 @@ const require = createRequire(import.meta.url);
 const { version: SERVER_VERSION } = require("../package.json") as { version: string };
 
 const SERVER_INSTRUCTIONS = [
-  "Meta MCP server for managing Instagram and Threads via the Meta Graph API.",
+  "Acellere Instagram MCP, based on meta-mcp, for managing Instagram and related Meta Graph API capabilities.",
+  "The Acellere fork starts in server-enforced read-only mode. Set ACELLERE_WRITE_MODE=write only when mutations are intentionally enabled.",
+  "DELETE requests remain blocked unless ACELLERE_ALLOW_DESTRUCTIVE=true is also set.",
   "Instagram tools require INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID; Threads tools require THREADS_ACCESS_TOKEN and THREADS_USER_ID.",
   "Token-rotation tools (meta_exchange_token, meta_refresh_token) additionally need META_APP_ID and META_APP_SECRET.",
   "Most publishing tools follow a two-step flow internally: create a container, wait for processing (up to 30s for images, up to 5 minutes for videos), then publish — exposed as a single MCP tool call.",
@@ -33,13 +35,13 @@ const SERVER_INSTRUCTIONS = [
 // must be declared or sendLoggingMessage is a silent no-op (#62).
 function buildServer(config: MetaConfig): McpServer {
   const server = new McpServer({
-    name: "meta-mcp",
+    name: "acellere-instagram-mcp",
     version: SERVER_VERSION,
   }, {
     instructions: SERVER_INSTRUCTIONS,
     capabilities: { logging: {} },
   });
-  const client = new MetaClient(config, { logger: createMcpLogger(server, "meta-client") });
+  const client = new AcellereMetaClient(config, { logger: createMcpLogger(server, "meta-client") });
   registerAll(server, client);
   return server;
 }
