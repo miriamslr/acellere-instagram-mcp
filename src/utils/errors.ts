@@ -82,10 +82,6 @@ function isBusinessUseCaseRateLimit(code?: number): boolean {
   return typeof code === "number" && code >= 80001 && code <= 80008;
 }
 
-function isPermissionMessage(message: string): boolean {
-  return /does not have permission|permission denied|missing (?:required )?permission/i.test(message);
-}
-
 function categorize(error: unknown): ErrorType {
   // Must run before the `instanceof Error` block — MetaNetworkError.name is
   // "MetaNetworkError", so the AbortError/TimeoutError checks below would
@@ -110,13 +106,9 @@ function categorize(error: unknown): ErrorType {
     if (apiCode !== undefined && VALIDATION_CODES.has(apiCode)) {
       return "validation";
     }
-    // Code 10 means the app is not allowed to perform the requested action.
-    // Treat it separately from token authentication so callers are directed
-    // to permissions/capabilities/App Review instead of rotating a healthy token.
-    if (
-      (apiCode !== undefined && PERMISSION_CODES.has(apiCode)) ||
-      (httpStatus === 403 && isPermissionMessage(error.message))
-    ) {
+    // Meta code 10 is an application permission/capability failure. Keep it
+    // separate from authentication so callers do not rotate a healthy token.
+    if (apiCode !== undefined && PERMISSION_CODES.has(apiCode)) {
       return "permission";
     }
     if (
