@@ -29,15 +29,15 @@ describe("Meta permission error classification", () => {
     expect(payload.remediation).not.toContain("meta_exchange_token");
   });
 
-  it("classifies an explicit 403 permission message as permission", () => {
+  it("keeps a generic 403 without Meta code 10 as validation", () => {
     const error = new MetaApiError({
-      message: "Application does not have permission for this action",
+      message: "permission denied",
       httpStatus: 403,
       endpoint: "/resource",
       method: "GET",
     });
 
-    expect(parse(formatErrorResponse(error, "Read resource")).error_type).toBe("permission");
+    expect(parse(formatErrorResponse(error, "Read resource")).error_type).toBe("validation");
   });
 
   it("keeps expired/invalid token code 190 classified as auth", () => {
