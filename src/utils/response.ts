@@ -26,6 +26,17 @@ function isSensitiveFieldName(name: string): boolean {
   return SENSITIVE_FIELD_NAMES.has(name.toLowerCase());
 }
 
+function sanitizeMalformedUrlLikeString(value: string): string {
+  return value
+    .replace(
+      /([?&])(?:access_token|appsecret_proof|client_secret|app_secret)=[^&#\s]*/gi,
+      "$1"
+    )
+    .replace(/\?&/g, "?")
+    .replace(/&&+/g, "&")
+    .replace(/[?&](?=#|$)/g, "");
+}
+
 function sanitizeUrlString(value: string): string {
   // Avoid normalizing every URL/string. Only touch values that may contain a
   // sensitive query parameter.
@@ -39,12 +50,9 @@ function sanitizeUrlString(value: string): string {
     for (const key of keysToDelete) url.searchParams.delete(key);
     return url.toString();
   } catch {
-    // Defensive fallback for malformed URL-like strings. Redact rather than
-    // echoing the credential if URL parsing is not possible.
-    return value.replace(
-      /([?&])((?:access_token|appsecret_proof|client_secret|app_secret))=[^&#\s]*/gi,
-      "$1$2=[REDACTED]"
-    );
+    // Defensive fallback for malformed URL-like strings. Remove the complete
+    // secret-bearing query parameter instead of echoing or redacting its value.
+    return sanitizeMalformedUrlLikeString(value);
   }
 }
 
