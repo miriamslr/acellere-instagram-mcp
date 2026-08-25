@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "acellere-instagram-mcp",
+  "main": "src/worker.ts",
+  "account_id": "2bbf9af1af4a1d1466579ae28267a9b8",
+  "compatibility_date": "2026-08-18",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "INSTAGRAM_USER_ID": "17841421598761181",
+    "INSTAGRAM_API_MODE": "facebook-login",
+    "META_API_VERSION": "v26.0",
+    "ACELLERE_WRITE_MODE": "read-only",
+    "ACELLERE_ALLOW_DESTRUCTIVE": "false"
+  }
+}
