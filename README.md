@@ -6,6 +6,21 @@
 
 Enables AI assistants to manage Instagram and Threads accounts — publish content, handle comments, view insights, search hashtags, and manage DMs through the Meta Graph API.
 
+## Acellere Production Deployment & Baseline
+
+Este repositório é o fork oficial de produção da **Acellere** para o Instagram MCP (`miriamslr/acellere-instagram-mcp`), publicado e operando no **Cloudflare Workers**.
+
+### Configuração de Produção
+- **Runtime**: Cloudflare Worker (`src/worker.ts` via `WebStandardStreamableHTTPServerTransport`)
+- **URL Base**: `https://acellere-instagram-mcp.acellere-mcps.workers.dev`
+- **Endpoint MCP**: `/mcp` (Streamable HTTP JSON-RPC 2.0 com suporte a `?token=<AUTH_TOKEN>` ou `Authorization: Bearer <AUTH_TOKEN>`)
+- **Health Check**: `/health` ➔ `{"status":"ok"}` (Público, sem dados sensíveis)
+- **Modo de Operação**: `ACELLERE_WRITE_MODE=read-only` (Bloqueio estrito de qualquer mutação na Graph API)
+- **Proteção Destrutiva**: `ACELLERE_ALLOW_DESTRUCTIVE=false` (Bloqueio estrito de operações DELETE)
+- **Versão da API**: Meta Graph API `v26.0` (`META_API_VERSION=v26.0`, `INSTAGRAM_API_MODE=facebook-login`)
+- **Segurança de Segredos**: `INSTAGRAM_ACCESS_TOKEN` e `AUTH_TOKEN` armazenados exclusivamente no cofre da Cloudflare Secrets (nunca em código ou logs)
+- **Release Baseline**: `v1.0.0-acellere` (Ponto estável conhecido para rollback)
+
 ## Prerequisites
 
 - **Node.js 22+** (LTS recommended)
