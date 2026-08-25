@@ -89,6 +89,8 @@ O primeiro teste deve usar apenas uma conta Instagram **Business ou Creator** ad
 ```env
 INSTAGRAM_ACCESS_TOKEN=...
 INSTAGRAM_USER_ID=...
+FACEBOOK_PAGE_ID=... # Obrigatório para ig_get_conversations em INSTAGRAM_API_MODE=facebook-login
+INSTAGRAM_API_MODE=facebook-login
 ACELLERE_WRITE_MODE=read-only
 ACELLERE_ALLOW_DESTRUCTIVE=false
 ```
@@ -99,14 +101,15 @@ Não adicionar credenciais reais ao GitHub. Usar secrets/variáveis do ambiente 
 
 A nomenclatura exata depende do caminho de autenticação (Facebook Login ou Instagram Login), mas as capacidades do servidor se agrupam assim:
 
-| Capacidade | Permissão típica |
-|---|---|
-| perfil e mídia | `instagram_basic` / `instagram_business_basic` |
-| publicação | `instagram_content_publish` / `instagram_business_content_publish` |
-| comentários | `instagram_manage_comments` / `instagram_business_manage_comments` |
-| insights | `instagram_manage_insights` / `instagram_business_manage_insights` |
-| Direct | `instagram_manage_messages` / `instagram_business_manage_messages` |
-| exclusão de mídia | `instagram_manage_contents` quando suportado pelo caminho de autenticação |
+| Capacidade | Permissão típica (Facebook Login / Instagram Login) | Contexto / ID Requerido |
+|---|---|---|
+| perfil e mídia | `instagram_basic` / `instagram_business_basic` | Instagram Account ID (`INSTAGRAM_USER_ID`) |
+| publicação | `instagram_content_publish` / `instagram_business_content_publish` | Instagram Account ID (`INSTAGRAM_USER_ID`) |
+| comentários | `instagram_manage_comments` / `instagram_business_manage_comments` | Instagram Account ID (`INSTAGRAM_USER_ID`) |
+| insights | `instagram_manage_insights` / `instagram_business_manage_insights` | Instagram Account ID (`INSTAGRAM_USER_ID`) |
+| Direct (conversas) | `instagram_manage_messages` + `pages_manage_metadata` / `instagram_business_manage_messages` | Facebook Page ID (`FACEBOOK_PAGE_ID`) no Facebook Login / IG User ID no Instagram Login |
+| Direct (mensagens) | `instagram_manage_messages` / `instagram_business_manage_messages` | Message ID / Conversation ID |
+| exclusão de mídia | `instagram_manage_contents` quando suportado pelo caminho de autenticação | Media ID |
 
 Hashtag discovery, Business Discovery e determinadas superfícies públicas têm requisitos adicionais da Meta e devem ser validadas no app real antes de serem tratadas como disponíveis em produção.
 

@@ -17,7 +17,7 @@ Este repositório é o fork oficial de produção da **Acellere** para o Instagr
 - **Health Check**: `/health` ➔ `{"status":"ok"}` (Público, sem dados sensíveis)
 - **Modo de Operação**: `ACELLERE_WRITE_MODE=read-only` (Bloqueio estrito de qualquer mutação na Graph API)
 - **Proteção Destrutiva**: `ACELLERE_ALLOW_DESTRUCTIVE=false` (Bloqueio estrito de operações DELETE)
-- **Versão da API**: Meta Graph API `v26.0` (`META_API_VERSION=v26.0`, `INSTAGRAM_API_MODE=facebook-login`)
+- **Versão da API**: Meta Graph API `v26.0` (`META_API_VERSION=v26.0`, `INSTAGRAM_API_MODE=facebook-login`, `FACEBOOK_PAGE_ID=1266932313170442`)
 - **Segurança de Segredos**: `INSTAGRAM_ACCESS_TOKEN` e `AUTH_TOKEN` armazenados exclusivamente no cofre da Cloudflare Secrets (nunca em código ou logs)
 - **Release Baseline**: `v1.0.0-acellere` (Ponto estável conhecido para rollback)
 - **Pipeline de Integração Contínua & Deploy Automático**:
@@ -45,6 +45,7 @@ Add to your MCP client config:
       "env": {
         "INSTAGRAM_ACCESS_TOKEN": "your_ig_token",
         "INSTAGRAM_USER_ID": "your_ig_user_id",
+        "FACEBOOK_PAGE_ID": "your_facebook_page_id",
         "THREADS_ACCESS_TOKEN": "your_threads_token",
         "THREADS_USER_ID": "your_threads_user_id"
       }
@@ -73,6 +74,7 @@ npm run build
       "env": {
         "INSTAGRAM_ACCESS_TOKEN": "your_ig_token",
         "INSTAGRAM_USER_ID": "your_ig_user_id",
+        "FACEBOOK_PAGE_ID": "your_facebook_page_id",
         "THREADS_ACCESS_TOKEN": "your_threads_token",
         "THREADS_USER_ID": "your_threads_user_id"
       }
@@ -87,6 +89,7 @@ npm run build
 |----------|----------|-------------|
 | `INSTAGRAM_ACCESS_TOKEN` | For Instagram | Instagram Graph API access token |
 | `INSTAGRAM_USER_ID` | For Instagram | Instagram Business/Creator account ID (numeric string, or `"me"` for the authenticated user) |
+| `FACEBOOK_PAGE_ID` | Optional (facebook-login) | Facebook Page ID associated with the Instagram account. Required for Page-scoped endpoints (e.g. `ig_get_conversations`) when `INSTAGRAM_API_MODE=facebook-login` |
 | `THREADS_ACCESS_TOKEN` | For Threads | Threads API access token |
 | `THREADS_USER_ID` | For Threads | Threads user ID (numeric string, or `"me"` for the authenticated user) |
 | `META_APP_ID` | For token/webhook tools | Meta App ID (numeric string) |

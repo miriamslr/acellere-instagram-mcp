@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 const ENV_VARS = [
   "META_APP_ID",
   "META_APP_SECRET",
+  "FACEBOOK_PAGE_ID",
   "INSTAGRAM_ACCESS_TOKEN",
   "INSTAGRAM_USER_ID",
   "THREADS_ACCESS_TOKEN",
@@ -26,6 +27,7 @@ describe("loadConfig", () => {
   it("returns the parsed config when every var is set and numeric IDs are valid", () => {
     vi.stubEnv("META_APP_ID", "1234567890");
     vi.stubEnv("META_APP_SECRET", "app-secret");
+    vi.stubEnv("FACEBOOK_PAGE_ID", "1266932313170442");
     vi.stubEnv("INSTAGRAM_ACCESS_TOKEN", "ig-token");
     vi.stubEnv("INSTAGRAM_USER_ID", "17841405822304914");
     vi.stubEnv("THREADS_ACCESS_TOKEN", "threads-token");
@@ -36,6 +38,7 @@ describe("loadConfig", () => {
     expect(config).toEqual({
       appId: "1234567890",
       appSecret: "app-secret",
+      facebookPageId: "1266932313170442",
       instagramAccessToken: "ig-token",
       instagramUserId: "17841405822304914",
       threadsAccessToken: "threads-token",
@@ -50,6 +53,7 @@ describe("loadConfig", () => {
     expect(config).toEqual({
       appId: "",
       appSecret: "",
+      facebookPageId: "",
       instagramAccessToken: "",
       instagramUserId: "",
       threadsAccessToken: "",
@@ -213,6 +217,12 @@ describe("loadConfig", () => {
     vi.stubEnv("META_APP_SECRET", "app-secret");
 
     expect(() => loadConfig()).toThrow(/META_APP_ID must be a numeric string/);
+  });
+
+  it("throws on non-numeric FACEBOOK_PAGE_ID", () => {
+    vi.stubEnv("FACEBOOK_PAGE_ID", "not-a-numeric-page-id");
+
+    expect(() => loadConfig()).toThrow(/FACEBOOK_PAGE_ID must be a numeric string/);
   });
 
   it('accepts "0" as a valid numeric ID (falsy-string regression coverage for ?? vs ||)', () => {

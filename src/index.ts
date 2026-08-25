@@ -81,6 +81,7 @@ export function createSandboxServer(): McpServer {
   const mockConfig: MetaConfig = {
     appId: "",
     appSecret: "",
+    facebookPageId: "",
     instagramAccessToken: "",
     instagramUserId: "",
     threadsAccessToken: "",

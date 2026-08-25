@@ -22,6 +22,7 @@ export interface WorkerEnv {
   AUTH_TOKEN?: string;
   INSTAGRAM_ACCESS_TOKEN?: string;
   INSTAGRAM_USER_ID?: string;
+  FACEBOOK_PAGE_ID?: string;
   INSTAGRAM_API_MODE?: string;
   META_API_VERSION?: string;
   ACELLERE_WRITE_MODE?: string;
@@ -42,6 +43,7 @@ export function buildWorkerServer(env: WorkerEnv): McpServer {
   const config: MetaConfig = {
     appId: env.META_APP_ID ?? "",
     appSecret: env.META_APP_SECRET ?? "",
+    facebookPageId: env.FACEBOOK_PAGE_ID ?? "",
     instagramAccessToken: env.INSTAGRAM_ACCESS_TOKEN ?? "",
     instagramUserId: env.INSTAGRAM_USER_ID ?? "",
     threadsAccessToken: env.THREADS_ACCESS_TOKEN ?? "",

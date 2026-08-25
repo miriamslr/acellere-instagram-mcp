@@ -2,14 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MetaConfig } from "../config.js";
 import { AcellereMetaClient, assertAcellereWriteAllowed } from "./acellere-meta-client.js";
 
-function makeConfig(): MetaConfig {
+function makeConfig(overrides?: Partial<MetaConfig>): MetaConfig {
   return {
     appId: "",
     appSecret: "",
+    facebookPageId: "",
     instagramAccessToken: "test-token",
     instagramUserId: "123456",
     threadsAccessToken: "",
     threadsUserId: "",
+    ...overrides,
   };
 }
 
@@ -135,5 +137,54 @@ describe("Instagram API mode routing", () => {
       if (previous === undefined) delete process.env.INSTAGRAM_API_MODE;
       else process.env.INSTAGRAM_API_MODE = previous;
     }
+  });
+});
+
+describe("Instagram conversations target ID routing", () => {
+  it("uses FACEBOOK_PAGE_ID for facebook-login mode", () => {
+    const client = new AcellereMetaClient(
+      makeConfig({
+        facebookPageId: "1266932313170442",
+        instagramUserId: "17841421598761181",
+      }),
+      {
+        instagramApiMode: "facebook-login",
+        writeMode: "read-only",
+      }
+    );
+
+    expect(client.igConversationsTargetId).toBe("1266932313170442");
+  });
+
+  it("throws clear configuration error when FACEBOOK_PAGE_ID is missing in facebook-login mode", () => {
+    const client = new AcellereMetaClient(
+      makeConfig({
+        facebookPageId: "",
+        instagramUserId: "17841421598761181",
+      }),
+      {
+        instagramApiMode: "facebook-login",
+        writeMode: "read-only",
+      }
+    );
+
+    expect(() => client.igConversationsTargetId).toThrow(
+      /FACEBOOK_PAGE_ID is not configured.*INSTAGRAM_API_MODE=facebook-login/
+    );
+  });
+
+  it("uses INSTAGRAM_USER_ID for instagram-login mode", () => {
+    const client = new AcellereMetaClient(
+      makeConfig({
+        facebookPageId: "1266932313170442",
+        instagramUserId: "17841421598761181",
+      }),
+      {
+        instagramApiMode: "instagram-login",
+        writeMode: "read-only",
+      }
+    );
+
+    expect(client.igConversationsTargetId).toBe("17841421598761181");
   });
 });
