@@ -99,15 +99,18 @@ function categorize(error: unknown): ErrorType {
     ) {
       return "rate_limit";
     }
-    if (
-      httpStatus === 401 ||
-      apiType === "OAuthException" ||
-      (apiCode !== undefined && AUTH_CODES.has(apiCode))
-    ) {
-      return "auth";
-    }
+    // Meta frequently uses type="OAuthException" for request-shape and field
+    // validation errors too. Explicit API codes are more specific than the
+    // generic type, so classify them before falling back to OAuthException.
     if (apiCode !== undefined && VALIDATION_CODES.has(apiCode)) {
       return "validation";
+    }
+    if (
+      httpStatus === 401 ||
+      (apiCode !== undefined && AUTH_CODES.has(apiCode)) ||
+      apiType === "OAuthException"
+    ) {
+      return "auth";
     }
     if (apiCode !== undefined && SERVER_CODES.has(apiCode)) {
       return "server";
