@@ -18,7 +18,7 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
   server.registerTool(
     "ig_get_conversations",
     {
-      description: "Get Instagram DM conversations list. Requires 'instagram_business_manage_messages' permission and the Instagram Messaging API.",
+      description: "Get Instagram DM conversations list. Requires 'instagram_manage_messages' and 'pages_manage_metadata' with Facebook Page ID (Facebook Login) or 'instagram_business_manage_messages' (Instagram Login).",
       inputSchema: {
         folder: z.enum(["inbox", "spam"]).optional().describe("Folder to retrieve (default: inbox)"),
         limit: z.number().optional().describe("Number of conversations"),
@@ -34,7 +34,7 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
           { platform: "instagram", fields },
           { folder, limit, after, before }
         );
-        const { data, rateLimit } = await client.ig("GET", `/${client.igUserId}/conversations`, params);
+        const { data, rateLimit } = await client.ig("GET", `/${client.igConversationsTargetId}/conversations`, params);
         return formatResponse(data, rateLimit);
       } catch (error) {
         return formatErrorResponse(error, "Get conversations");
@@ -71,7 +71,7 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
   server.registerTool(
     "ig_send_message",
     {
-      description: "Send a DM to a user. Requires 'instagram_business_manage_messages' permission. The recipient must have messaged the account first. Messaging window depends on messaging_type: RESPONSE/UPDATE allow replies within 24 hours of the user's last message; MESSAGE_TAG with tag=HUMAN_AGENT extends the window to 7 days (human-sent support replies only — the HUMAN_AGENT feature requires App Review and forbids automated use, per https://developers.facebook.com/docs/features-reference/human-agent). Other tag values are Messenger-oriented; HUMAN_AGENT is the documented reliable choice on Instagram.",
+      description: "Send a DM to a user. Requires 'instagram_manage_messages' (Facebook Login) or 'instagram_business_manage_messages' (Instagram Login) permission. The recipient must have messaged the account first. Messaging window depends on messaging_type: RESPONSE/UPDATE allow replies within 24 hours of the user's last message; MESSAGE_TAG with tag=HUMAN_AGENT extends the window to 7 days (human-sent support replies only — the HUMAN_AGENT feature requires App Review and forbids automated use, per https://developers.facebook.com/docs/features-reference/human-agent). Other tag values are Messenger-oriented; HUMAN_AGENT is the documented reliable choice on Instagram.",
       inputSchema: {
         recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
         message: z.string()

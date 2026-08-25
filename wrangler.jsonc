@@ -12,6 +12,7 @@
   },
   "vars": {
     "INSTAGRAM_USER_ID": "17841421598761181",
+    "FACEBOOK_PAGE_ID": "1266932313170442",
     "INSTAGRAM_API_MODE": "facebook-login",
     "META_API_VERSION": "v26.0",
     "ACELLERE_WRITE_MODE": "read-only",

@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerIgMessagingTools } from "./messaging.js";
 import { MetaClient } from "../../services/meta-client.js";
+import { AcellereMetaClient } from "../../services/acellere-meta-client.js";
 import { makeMockServer, type MockServer } from "../test-utils.js";
 
-function makeMockClient(): MetaClient {
+function makeMockClient(overrides?: Partial<MetaClient>): MetaClient {
   return {
     igUserId: "123",
+    igConversationsTargetId: "123",
     ig: vi.fn(async () => ({
       data: { data: [] },
       rateLimit: undefined,
     })),
+    ...overrides,
   } as unknown as MetaClient;
 }
 
@@ -346,5 +349,123 @@ describe("ig_send_message message length validation", () => {
     await expect(
       server.callTool("ig_send_message", { recipient_id: "u_1", message: atByteLimit })
     ).resolves.toBeDefined();
+  });
+});
+
+describe("ig_get_conversations mode-aware routing with AcellereMetaClient", () => {
+  it("uses FACEBOOK_PAGE_ID and never INSTAGRAM_USER_ID when in facebook-login mode", async () => {
+    const server = makeMockServer();
+    const client = new AcellereMetaClient(
+      {
+        appId: "",
+        appSecret: "",
+        facebookPageId: "1266932313170442",
+        instagramAccessToken: "test-token",
+        instagramUserId: "17841421598761181",
+        threadsAccessToken: "",
+        threadsUserId: "",
+      },
+      {
+        instagramApiMode: "facebook-login",
+        writeMode: "read-only",
+      }
+    );
+
+    const igSpy = vi.spyOn(client, "ig").mockResolvedValue({
+      data: { data: [{ id: "conv_123" }] },
+      rateLimit: undefined,
+    });
+
+    registerIgMessagingTools(server as never, client);
+
+    const result = (await server.callTool("ig_get_conversations", {})) as {
+      isError?: boolean;
+      content: { text: string }[];
+    };
+
+    expect(result.isError).toBeFalsy();
+    expect(igSpy).toHaveBeenCalledTimes(1);
+    const [method, path, params] = igSpy.mock.calls[0];
+    expect(method).toBe("GET");
+    expect(path).toBe("/1266932313170442/conversations");
+    expect(path).not.toContain("17841421598761181");
+    expect(params).toMatchObject({
+      platform: "instagram",
+    });
+  });
+
+  it("uses INSTAGRAM_USER_ID when in instagram-login mode", async () => {
+    const server = makeMockServer();
+    const client = new AcellereMetaClient(
+      {
+        appId: "",
+        appSecret: "",
+        facebookPageId: "1266932313170442",
+        instagramAccessToken: "test-token",
+        instagramUserId: "17841421598761181",
+        threadsAccessToken: "",
+        threadsUserId: "",
+      },
+      {
+        instagramApiMode: "instagram-login",
+        writeMode: "read-only",
+      }
+    );
+
+    const igSpy = vi.spyOn(client, "ig").mockResolvedValue({
+      data: { data: [{ id: "conv_456" }] },
+      rateLimit: undefined,
+    });
+
+    registerIgMessagingTools(server as never, client);
+
+    const result = (await server.callTool("ig_get_conversations", {})) as {
+      isError?: boolean;
+      content: { text: string }[];
+    };
+
+    expect(result.isError).toBeFalsy();
+    expect(igSpy).toHaveBeenCalledTimes(1);
+    const [method, path, params] = igSpy.mock.calls[0];
+    expect(method).toBe("GET");
+    expect(path).toBe("/17841421598761181/conversations");
+    expect(params).toMatchObject({
+      platform: "instagram",
+    });
+  });
+
+  it("returns clear configuration error when FACEBOOK_PAGE_ID is missing in facebook-login mode", async () => {
+    const server = makeMockServer();
+    const client = new AcellereMetaClient(
+      {
+        appId: "",
+        appSecret: "",
+        facebookPageId: "",
+        instagramAccessToken: "test-token",
+        instagramUserId: "17841421598761181",
+        threadsAccessToken: "",
+        threadsUserId: "",
+      },
+      {
+        instagramApiMode: "facebook-login",
+        writeMode: "read-only",
+      }
+    );
+
+    const igSpy = vi.spyOn(client, "ig");
+
+    registerIgMessagingTools(server as never, client);
+
+    const result = (await server.callTool("ig_get_conversations", {})) as {
+      isError?: boolean;
+      content: { text: string }[];
+    };
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.message).toMatch(
+      /FACEBOOK_PAGE_ID is not configured.*INSTAGRAM_API_MODE=facebook-login/
+    );
+    expect(igSpy).not.toHaveBeenCalled();
   });
 });

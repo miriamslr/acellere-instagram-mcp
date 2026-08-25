@@ -8,6 +8,11 @@ const appIdSchema = z
   .regex(/^\d*$/, "META_APP_ID must be a numeric string")
   .default("");
 
+const pageIdSchema = z
+  .string()
+  .regex(/^\d*$/, "FACEBOOK_PAGE_ID must be a numeric string")
+  .default("");
+
 // User IDs accept either a numeric string or the literal "me" — Meta's
 // Graph/Threads APIs accept "me" as the authenticated-user alias on
 // `/{user-id}/...` paths (e.g., GET https://graph.threads.net/v1.0/me).
@@ -23,6 +28,7 @@ const userIdSchema = (envName: string) =>
 export const MetaConfigSchema = z.object({
   appId: appIdSchema,
   appSecret: z.string().default(""),
+  facebookPageId: pageIdSchema,
   instagramAccessToken: z.string().default(""),
   instagramUserId: userIdSchema("INSTAGRAM_USER_ID"),
   threadsAccessToken: z.string().default(""),
@@ -35,6 +41,7 @@ export function loadConfig(): MetaConfig {
   const result = MetaConfigSchema.safeParse({
     appId: process.env.META_APP_ID,
     appSecret: process.env.META_APP_SECRET,
+    facebookPageId: process.env.FACEBOOK_PAGE_ID,
     instagramAccessToken: process.env.INSTAGRAM_ACCESS_TOKEN,
     instagramUserId: process.env.INSTAGRAM_USER_ID,
     threadsAccessToken: process.env.THREADS_ACCESS_TOKEN,

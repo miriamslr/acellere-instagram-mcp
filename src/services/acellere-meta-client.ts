@@ -183,4 +183,17 @@ export class AcellereMetaClient extends MetaClient {
     assertAcellereWriteAllowed(method, this.safety);
     return super.meta(method, path, params, options);
   }
+
+  override get igConversationsTargetId(): string {
+    if (this.instagramApiMode === "facebook-login") {
+      const internals = this as unknown as MetaClientInternals;
+      if (!internals.config.facebookPageId) {
+        throw new Error(
+          "FACEBOOK_PAGE_ID is not configured. When INSTAGRAM_API_MODE=facebook-login, Instagram conversations require the associated Facebook Page ID."
+        );
+      }
+      return internals.config.facebookPageId;
+    }
+    return this.igUserId;
+  }
 }
