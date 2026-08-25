@@ -1,7 +1,7 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { HttpMethod } from "../services/meta-client.js";
 
-export type ErrorType = "auth" | "validation" | "rate_limit" | "server" | "network" | "internal";
+export type ErrorType = "auth" | "permission" | "validation" | "rate_limit" | "server" | "network" | "internal";
 
 interface MetaApiErrorInit {
   message: string;
@@ -72,13 +72,18 @@ export class MetaNetworkError extends Error {
   }
 }
 
-const AUTH_CODES = new Set([10, 102, 190]);
+const AUTH_CODES = new Set([102, 190]);
+const PERMISSION_CODES = new Set([10]);
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 341, 613]);
 const VALIDATION_CODES = new Set([100, 200, 803]);
 const SERVER_CODES = new Set([1, 2]);
 
 function isBusinessUseCaseRateLimit(code?: number): boolean {
   return typeof code === "number" && code >= 80001 && code <= 80008;
+}
+
+function isPermissionMessage(message: string): boolean {
+  return /does not have permission|permission denied|missing (?:required )?permission/i.test(message);
 }
 
 function categorize(error: unknown): ErrorType {
@@ -104,6 +109,15 @@ function categorize(error: unknown): ErrorType {
     // generic type, so classify them before falling back to OAuthException.
     if (apiCode !== undefined && VALIDATION_CODES.has(apiCode)) {
       return "validation";
+    }
+    // Code 10 means the app is not allowed to perform the requested action.
+    // Treat it separately from token authentication so callers are directed
+    // to permissions/capabilities/App Review instead of rotating a healthy token.
+    if (
+      (apiCode !== undefined && PERMISSION_CODES.has(apiCode)) ||
+      (httpStatus === 403 && isPermissionMessage(error.message))
+    ) {
+      return "permission";
     }
     if (
       httpStatus === 401 ||
@@ -131,6 +145,7 @@ function categorize(error: unknown): ErrorType {
 
 const REMEDIATION: Partial<Record<ErrorType, string>> = {
   auth: "Refresh the access token via meta_exchange_token (short→long) or meta_refresh_token (long→long), or generate a new token from the Meta App dashboard. The token may be expired, revoked, or scoped incorrectly.",
+  permission: "Review the permissions and product capabilities required by this Meta endpoint, including access level/App Review where applicable. If you add scopes or capabilities, reauthorize the app and then update the token; do not rotate an otherwise healthy token solely for this error.",
   rate_limit: "Retry after a delay with exponential backoff. Inspect the _rateLimit field on prior successful responses to gauge headroom; consider reducing call volume or batching.",
   server: "Transient Meta server issue — retry with exponential backoff. If it persists, check status.dev.facebook.com.",
   network: "Network error or timeout reaching the Meta API. Retry with exponential backoff; verify outbound connectivity.",
