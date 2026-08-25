@@ -20,6 +20,13 @@ Este repositório é o fork oficial de produção da **Acellere** para o Instagr
 - **Versão da API**: Meta Graph API `v26.0` (`META_API_VERSION=v26.0`, `INSTAGRAM_API_MODE=facebook-login`)
 - **Segurança de Segredos**: `INSTAGRAM_ACCESS_TOKEN` e `AUTH_TOKEN` armazenados exclusivamente no cofre da Cloudflare Secrets (nunca em código ou logs)
 - **Release Baseline**: `v1.0.0-acellere` (Ponto estável conhecido para rollback)
+- **Pipeline de Integração Contínua & Deploy Automático**:
+  - `Pull Request` ➔ `GitHub CI` (lint, typecheck, vitest, audit, build)
+  - `Merge em main` ➔ `Cloudflare Git Integration` (build & deploy automático do Worker `acellere-instagram-mcp`)
+  - Verificação de status de deploy: `npx wrangler deployments list` ou Cloudflare Dashboard
+  - Diagnóstico de falha: verificar logs de build no Cloudflare Dashboard ou GitHub Actions CI
+  - Procedimento de rollback: `npx wrangler rollback <version-id>` ou checkout e redeploy do baseline `v1.0.0-acellere`
+
 
 ## Prerequisites
 
