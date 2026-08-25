@@ -1,7 +1,7 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { HttpMethod } from "../services/meta-client.js";
 
-export type ErrorType = "auth" | "validation" | "rate_limit" | "server" | "network" | "internal";
+export type ErrorType = "auth" | "permission" | "validation" | "rate_limit" | "server" | "network" | "internal";
 
 interface MetaApiErrorInit {
   message: string;
@@ -72,7 +72,8 @@ export class MetaNetworkError extends Error {
   }
 }
 
-const AUTH_CODES = new Set([10, 102, 190]);
+const AUTH_CODES = new Set([102, 190]);
+const PERMISSION_CODES = new Set([10]);
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 341, 613]);
 const VALIDATION_CODES = new Set([100, 200, 803]);
 const SERVER_CODES = new Set([1, 2]);
@@ -105,6 +106,11 @@ function categorize(error: unknown): ErrorType {
     if (apiCode !== undefined && VALIDATION_CODES.has(apiCode)) {
       return "validation";
     }
+    // Meta code 10 is an application permission/capability failure. Keep it
+    // separate from authentication so callers do not rotate a healthy token.
+    if (apiCode !== undefined && PERMISSION_CODES.has(apiCode)) {
+      return "permission";
+    }
     if (
       httpStatus === 401 ||
       (apiCode !== undefined && AUTH_CODES.has(apiCode)) ||
@@ -131,6 +137,7 @@ function categorize(error: unknown): ErrorType {
 
 const REMEDIATION: Partial<Record<ErrorType, string>> = {
   auth: "Refresh the access token via meta_exchange_token (short→long) or meta_refresh_token (long→long), or generate a new token from the Meta App dashboard. The token may be expired, revoked, or scoped incorrectly.",
+  permission: "Review the permissions and product capabilities required by this Meta endpoint, including access level/App Review where applicable. If you add scopes or capabilities, reauthorize the app and then update the token; do not rotate an otherwise healthy token solely for this error.",
   rate_limit: "Retry after a delay with exponential backoff. Inspect the _rateLimit field on prior successful responses to gauge headroom; consider reducing call volume or batching.",
   server: "Transient Meta server issue — retry with exponential backoff. If it persists, check status.dev.facebook.com.",
   network: "Network error or timeout reaching the Meta API. Retry with exponential backoff; verify outbound connectivity.",
