@@ -50,7 +50,7 @@ export function registerMetaAuthTools(server: McpServer, client: MetaClient): vo
           ? await client.threadsExchangeToken(short_lived_token)
           : await client.igExchangeToken(short_lived_token);
         applyTokenIfPresent(client, platform, data, "meta_exchange_token");
-        return formatResponse(data, rateLimit);
+        return formatResponse(data, rateLimit, { allowSensitiveFields: true });
       } catch (error) {
         return formatErrorResponse(error, "Token exchange");
       }
@@ -74,7 +74,7 @@ export function registerMetaAuthTools(server: McpServer, client: MetaClient): vo
           ? await client.threadsRefreshToken(long_lived_token)
           : await client.igRefreshToken(long_lived_token);
         applyTokenIfPresent(client, platform, data, "meta_refresh_token");
-        return formatResponse(data, rateLimit);
+        return formatResponse(data, rateLimit, { allowSensitiveFields: true });
       } catch (error) {
         return formatErrorResponse(error, "Token refresh");
       }
@@ -101,7 +101,7 @@ export function registerMetaAuthTools(server: McpServer, client: MetaClient): vo
     }
   );
 
-  // ─── meta_get_app_info ───────────────────────────────────────
+  // ─── meta_get_app_info ────────────────────────────────────────
   server.registerTool(
     "meta_get_app_info",
     {
