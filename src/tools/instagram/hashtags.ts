@@ -46,7 +46,7 @@ export function registerIgHashtagTools(server: McpServer, client: MetaClient): v
   server.registerTool(
     "ig_get_hashtag",
     {
-      description: "Get hashtag information by ID.",
+      description: "Get hashtag information by ID. Meta Graph API exposes the hashtag object's id and name; media is queried separately through recent/top media endpoints.",
       inputSchema: {
         hashtag_id: metaId.describe("Hashtag ID (from ig_search_hashtag)"),
       },
@@ -55,7 +55,10 @@ export function registerIgHashtagTools(server: McpServer, client: MetaClient): v
     async ({ hashtag_id }) => {
       try {
         const { data, rateLimit } = await client.ig("GET", `/${hashtag_id}`, {
-          fields: "id,name,media_count",
+          // `media_count` is not a supported field on the Instagram Hashtag
+          // object in current Graph API versions (including v26.0). Requesting
+          // it causes Meta error #100 even though hashtag media endpoints work.
+          fields: "id,name",
         });
         return formatResponse(data, rateLimit);
       } catch (error) {

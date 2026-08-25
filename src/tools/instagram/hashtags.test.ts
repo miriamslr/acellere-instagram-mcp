@@ -24,6 +24,27 @@ function makeMockClient(): MetaClient {
   } as unknown as MetaClient;
 }
 
+describe("ig_get_hashtag supported fields", () => {
+  it("requests only id and name from the hashtag object", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient();
+    (client.ig as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { id: "h_1", name: "marketingdigital" },
+      rateLimit: undefined,
+    });
+    registerIgHashtagTools(server as never, client);
+
+    const handler = server.tools.get("ig_get_hashtag")!;
+    await handler({ hashtag_id: "h_1" });
+
+    expect(client.ig).toHaveBeenCalledWith("GET", "/h_1", {
+      fields: "id,name",
+    });
+    const params = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0][2] as Record<string, unknown>;
+    expect(params.fields).not.toContain("media_count");
+  });
+});
+
 describe("ig_get_hashtag_recent pagination cursors", () => {
   let server: ReturnType<typeof makeMockServer>;
   let client: ReturnType<typeof makeMockClient>;
