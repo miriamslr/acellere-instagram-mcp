@@ -42,7 +42,7 @@ A arquitetura opera com um **Capability Guard Gateway** centralizado (`src/insta
 | `publishing.stories` | Publishing | `POST /{ig-user-id}/media` + `media_publish` | POST | ✅ | ✅ | `ig_publish_story` | `instagram_content_publish` | `instagram_business_content_publish` | `COVERED` |
 | `publishing.containerStatus` | Publishing | `GET /{container-id}` | GET | ✅ | ✅ | `ig_get_container_status` | `instagram_content_publish` | `instagram_business_content_publish` | `COVERED` |
 | `publishing.limits` | Publishing | `GET /{ig-user-id}/content_publishing_limit` | GET | ✅ | ✅ | `ig_get_content_publishing_limit` | `instagram_content_publish` | `instagram_business_content_publish` | `COVERED` |
-| `publishing.resumableUpload` | Publishing | `POST /{ig-user-id}/media?upload_type=resumable` | POST | ✅ | ✅ | `ig_create_resumable_upload_session` | `instagram_content_publish` | `instagram_business_content_publish` | `COVERED` |
+| `publishing.resumableUpload` | Publishing | `POST /{ig-user-id}/media?upload_type=resumable` + `POST https://rupload.facebook.com/ig-api-upload/` | POST | ✅ | ❌ | `ig_create_resumable_upload_session`, `ig_upload_resumable_binary`, `ig_publish_resumable_video` | `instagram_content_publish` | — | `FACEBOOK_LOGIN_ONLY` |
 | `media.list` | Media | `GET /{ig-user-id}/media` | GET | ✅ | ✅ | `ig_get_media_list` | `instagram_basic` | `instagram_business_basic` | `COVERED` |
 | `media.get` | Media | `GET /{ig-media-id}` | GET | ✅ | ✅ | `ig_get_media` | `instagram_basic` | `instagram_business_basic` | `COVERED` |
 | `media.children` | Media | `GET /{ig-media-id}/children` | GET | ✅ | ✅ | `ig_get_media_children` | `instagram_basic` | `instagram_business_basic` | `COVERED` |

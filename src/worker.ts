@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { AcellereMetaClient, type AcellereWriteMode, type InstagramApiMode } from "./services/acellere-meta-client.js";
+import { AcellereMetaClient } from "./services/acellere-meta-client.js";
 import { registerAll } from "./register-all.js";
 import { createMcpLogger } from "./utils/logger.js";
 import type { MetaConfig } from "./config.js";
@@ -8,6 +8,9 @@ import {
   normalizeInstagramWebhook,
   verifyWebhookSignature,
   DefaultWebhookEventSink,
+  InMemoryEventDeduplicator,
+  KVEventDeduplicator,
+  type CloudflareKVLike,
 } from "./services/webhook-normalizer.js";
 
 export const SERVER_VERSION = "8.0.0";
@@ -37,9 +40,11 @@ export interface WorkerEnv {
   META_APP_SECRET?: string;
   THREADS_ACCESS_TOKEN?: string;
   THREADS_USER_ID?: string;
+  KV_DEDUPLICATION?: CloudflareKVLike;
+  CACHE_KV?: CloudflareKVLike;
 }
 
-const defaultWebhookSink = new DefaultWebhookEventSink();
+const defaultWebhookDeduplicator = new InMemoryEventDeduplicator();
 
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -61,7 +66,7 @@ export function buildWorkerServer(env: WorkerEnv): McpServer {
   const server = new McpServer(
     {
       name: "acellere-instagram-mcp",
-      version: SERVER_VERSION,
+      version: "8.0.0",
     },
     {
       instructions: SERVER_INSTRUCTIONS,
@@ -69,16 +74,14 @@ export function buildWorkerServer(env: WorkerEnv): McpServer {
     }
   );
 
-  const writeMode = ((env.ACELLERE_WRITE_MODE ?? "read-only").trim().toLowerCase() === "write" ? "write" : "read-only") as AcellereWriteMode;
-  const allowDestructive = ["1", "true", "yes", "on"].includes(String(env.ACELLERE_ALLOW_DESTRUCTIVE ?? "false").trim().toLowerCase());
-  const instagramApiMode = ((env.INSTAGRAM_API_MODE ?? "facebook-login").trim().toLowerCase() === "instagram-login" ? "instagram-login" : "facebook-login") as InstagramApiMode;
-
   const client = new AcellereMetaClient(config, {
     logger: createMcpLogger(server, "meta-client"),
+    writeMode: (env.ACELLERE_WRITE_MODE as "read-only" | "write") ?? "read-only",
+    allowDestructive:
+      env.ACELLERE_ALLOW_DESTRUCTIVE === true || env.ACELLERE_ALLOW_DESTRUCTIVE === "true",
+    instagramApiMode:
+      (env.INSTAGRAM_API_MODE as "facebook-login" | "instagram-login") ?? "facebook-login",
     metaApiVersion: env.META_API_VERSION,
-    writeMode,
-    allowDestructive,
-    instagramApiMode,
   });
 
   registerAll(server, client);
@@ -87,6 +90,7 @@ export function buildWorkerServer(env: WorkerEnv): McpServer {
 
 export function verifyAuth(request: Request, env: WorkerEnv): boolean {
   if (!env.AUTH_TOKEN) {
+    // If no AUTH_TOKEN is configured in the environment, allow access
     return true;
   }
   const url = new URL(request.url);
@@ -103,12 +107,10 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Handle CORS preflight
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
-    // Health check endpoint (public, strictly safe, no Meta calls or env leaks)
     if (path === "/health") {
       return new Response(
         JSON.stringify({ status: "ok" }),
@@ -119,7 +121,6 @@ export default {
       );
     }
 
-    // Root Welcome Endpoint
     if (path === "/" || path === "") {
       return new Response(
         JSON.stringify({
@@ -138,7 +139,6 @@ export default {
       );
     }
 
-    // Instagram Webhook Endpoint
     if (path === "/webhooks/instagram" || path === "/webhook") {
       if (request.method === "GET") {
         const mode = url.searchParams.get("hub.mode");
@@ -156,7 +156,6 @@ export default {
         const rawBody = await request.text();
         const signature = request.headers.get("x-hub-signature-256");
 
-        // Fail-closed: require configured META_APP_SECRET and presence of X-Hub-Signature-256
         if (!env.META_APP_SECRET || !signature) {
           return new Response(
             JSON.stringify({ error: "Unauthorized: Webhook receiver requires configured META_APP_SECRET and X-Hub-Signature-256 header." }),
@@ -175,13 +174,20 @@ export default {
         try {
           const parsed = JSON.parse(rawBody);
           const normalized = normalizeInstagramWebhook(parsed);
-          const dispatchResult = await defaultWebhookSink.dispatch(normalized);
+          const kv = env.KV_DEDUPLICATION ?? env.CACHE_KV;
+          const deduplicator = kv
+            ? new KVEventDeduplicator(kv)
+            : defaultWebhookDeduplicator;
+          const sink = new DefaultWebhookEventSink(deduplicator);
+          const dispatchResult = await sink.dispatch(normalized);
+
           return new Response(
             JSON.stringify({
               status: "ok",
               received_events_count: normalized.length,
               dispatched: dispatchResult.dispatched,
               ignored_duplicates: dispatchResult.ignoredDuplicates,
+              ignored_replays: dispatchResult.ignoredReplays,
               events: normalized,
             }),
             { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }

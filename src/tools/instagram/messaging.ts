@@ -277,9 +277,15 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
               }),
               z.object({
                 content_type: z.literal("user_phone_number"),
+                title: z.string().min(1).max(20).optional().describe("Optional custom button label"),
+                payload: z.string().min(1).max(1000).optional().describe("Optional custom payload"),
+                image_url: z.string().url().optional().describe("Optional icon URL"),
               }),
               z.object({
                 content_type: z.literal("user_email"),
+                title: z.string().min(1).max(20).optional().describe("Optional custom button label"),
+                payload: z.string().min(1).max(1000).optional().describe("Optional custom payload"),
+                image_url: z.string().url().optional().describe("Optional icon URL"),
               }),
             ])
           )
@@ -317,7 +323,7 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
     "ig_send_generic_template",
     {
       description:
-        "Send an interactive Generic Template card or carousel (up to 10 cards) with image, title, subtitle, and CTA buttons in Direct. Write.",
+        "Send an interactive Generic Template card or carousel (up to 10 cards) with image, title, subtitle, CTA buttons, and default_action in Direct. Write.",
       inputSchema: {
         recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
         elements: z
@@ -326,6 +332,16 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
               title: z.string().min(1).max(80).describe("Card title (max 80 chars)"),
               subtitle: z.string().max(80).optional().describe("Card subtitle (max 80 chars)"),
               image_url: z.string().url().optional().describe("Card image URL"),
+              default_action: z
+                .object({
+                  type: z.literal("web_url").optional().default("web_url"),
+                  url: z.string().url().describe("URL to open when the card is tapped"),
+                  webview_height_ratio: z.enum(["compact", "tall", "full"]).optional(),
+                  messenger_extensions: z.boolean().optional(),
+                  fallback_url: z.string().url().optional(),
+                })
+                .optional()
+                .describe("Default action executed when the user taps on the card body/image"),
               buttons: z
                 .array(
                   z.object({

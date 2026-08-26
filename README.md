@@ -160,7 +160,7 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_get_connection_info` | Inspect sanitized connection status and user ID without exposing tokens |
 | `ig_bootstrap_discovery` | Discovers connected Facebook Pages and Instagram Business accounts (`/me/accounts` or `/me`) |
 
-### Instagram — Publishing & Limits (8)
+### Instagram — Publishing & Limits (10)
 
 | Tool | Description |
 |------|-------------|
@@ -172,6 +172,8 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_get_container_status` | Check media container processing status |
 | `ig_get_content_publishing_limit` | Check remaining 24-hour publishing quota and rolling window rate limits |
 | `ig_create_resumable_upload_session` | Create resumable upload session container for large video files via `upload_type=resumable` |
+| `ig_upload_resumable_binary` | Stream binary video bytes to `rupload.facebook.com` with OAuth, offset, and size headers |
+| `ig_publish_resumable_video` | Complete end-to-end resumable publishing flow (session -> binary transfer -> polling status -> publish) |
 
 ### Instagram — Media, Stories & Live (8)
 

@@ -395,18 +395,19 @@ export const INSTAGRAM_CAPABILITIES: Record<string, InstagramCapability> = {
     surface: "meta_official",
     category: "publishing",
     name: "Resumable Video Upload Session",
-    description: "Create resumable upload session container for large video files via upload_type=resumable",
-    endpoint: "POST /{ig-user-id}/media?upload_type=resumable",
+    description: "Create resumable upload session container for large video files via upload_type=resumable and stream to rupload.facebook.com",
+    endpoint: "POST /{ig-user-id}/media?upload_type=resumable + POST https://rupload.facebook.com/ig-api-upload/",
     method: "POST",
     facebookLogin: true,
-    instagramLogin: true,
+    instagramLogin: false,
     permissionsByMode: {
       "facebook-login": ["instagram_content_publish"],
-      "instagram-login": ["instagram_business_content_publish"],
+      "instagram-login": [],
     },
     readWrite: "WRITE",
-    status: "COVERED",
+    status: "FACEBOOK_LOGIN_ONLY",
     mcpTool: "ig_create_resumable_upload_session",
+    notes: "Resumable upload via rupload.facebook.com is officially supported for Facebook Login for Business apps.",
     verifiedDate: "2026-08-26",
   },
 
@@ -1736,17 +1737,28 @@ export function getCapabilitiesSummary(mode: InstagramApiMode): {
   return {
     login_mode: mode,
     official_surface: {
-      total: official.length,
+      total: OFFICIAL_CAPABILITIES_COUNT,
       available_count: officialAvailable.length,
       unavailable_count: officialUnavailable.length,
-      coverage_percentage: Math.round((officialAvailable.length / official.length) * 100),
+      coverage_percentage: Math.round((officialAvailable.length / OFFICIAL_CAPABILITIES_COUNT) * 100),
       available: officialAvailable,
       unavailable: officialUnavailable,
     },
     acellere_extensions: {
-      total: extensions.length,
+      total: ACELLERE_EXTENSIONS_COUNT,
       available_count: extAvailable.length,
       items: extAvailable,
     },
   };
 }
+
+export const OFFICIAL_CAPABILITIES = Object.values(INSTAGRAM_CAPABILITIES).filter(
+  (c) => c.surface === "meta_official"
+);
+export const OFFICIAL_CAPABILITIES_COUNT = OFFICIAL_CAPABILITIES.length;
+
+export const ACELLERE_EXTENSIONS = Object.values(INSTAGRAM_CAPABILITIES).filter(
+  (c) => c.surface === "acellere_extension"
+);
+export const ACELLERE_EXTENSIONS_COUNT = ACELLERE_EXTENSIONS.length;
+

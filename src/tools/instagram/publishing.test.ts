@@ -1101,4 +1101,99 @@ describe("ig_publish_video / _reel / _story error context", () => {
       caption: "Resumable Reel Upload",
     });
   });
+
+  it("ig_upload_resumable_binary streams video bytes to rupload endpoint with correct auth and offset headers", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      igAccessToken: "my-valid-ig-token",
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === "https://example.com/source.mp4") {
+        return new Response(new Uint8Array([1, 2, 3, 4, 5]), { status: 200 });
+      }
+      if (url.includes("rupload.facebook.com")) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      registerIgPublishingTools(server as never, client);
+      const handler = server.tools.get("ig_upload_resumable_binary")!;
+      const result = (await handler({
+        upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+        video_url: "https://example.com/source.mp4",
+        offset: 0,
+      })) as { content: { text: string }[] };
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.bytes_uploaded).toBe(5);
+
+      const ruploadCall = fetchMock.mock.calls.find((c) =>
+        String(c[0]).includes("rupload.facebook.com")
+      );
+      expect(ruploadCall).toBeDefined();
+      const headers = ruploadCall![1]?.headers as Record<string, string>;
+      expect(headers.Authorization).toBe("OAuth my-valid-ig-token");
+      expect(headers.offset).toBe("0");
+      expect(headers.file_size).toBe("5");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("ig_publish_resumable_video completes end-to-end publishing flow", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      igAccessToken: "my-valid-ig-token",
+      ig: vi.fn(async (_method: string, path: string) => {
+        if (path === "/1784140001/media") {
+          return {
+            data: { id: "container-resumable-123", uri: "https://rupload.facebook.com/upload-session" },
+            rateLimit: undefined,
+          };
+        }
+        if (path === "/container-resumable-123") {
+          return {
+            data: { status_code: "FINISHED", id: "container-resumable-123" },
+            rateLimit: undefined,
+          };
+        }
+        if (path === "/1784140001/media_publish") {
+          return {
+            data: { id: "published-reel-999" },
+            rateLimit: undefined,
+          };
+        }
+        return { data: {}, rateLimit: undefined };
+      }),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      registerIgPublishingTools(server as never, client);
+      const handler = server.tools.get("ig_publish_resumable_video")!;
+      const result = (await handler({
+        video_base64: btoa("sample-video-bytes-data"),
+        media_type: "REELS",
+        caption: "Full Resumable Reel Publication",
+      })) as { content: { text: string }[] };
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.id).toBe("published-reel-999");
+      expect(payload.container_id).toBe("container-resumable-123");
+      expect(payload.status).toBe("published");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

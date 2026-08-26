@@ -236,16 +236,18 @@ describe("Cloudflare Worker (src/worker.ts)", () => {
     });
 
     it("POST /webhooks/instagram fails closed when secret/signature is missing or invalid", async () => {
+      const currentSeconds = Math.floor(Date.now() / 1000);
       const payload = JSON.stringify({
         object: "instagram",
         entry: [
           {
             id: "1784140001",
-            time: 1715000000,
+            time: currentSeconds,
             messaging: [
               {
                 sender: { id: "igsid_123" },
                 recipient: { id: "1784140001" },
+                timestamp: currentSeconds * 1000,
                 message: { mid: "m_1", text: "Webhook message" },
               },
             ],
@@ -301,10 +303,11 @@ describe("Cloudflare Worker (src/worker.ts)", () => {
       });
       const validRes = await worker.fetch(validReq, baseEnv);
       expect(validRes.status).toBe(200);
-      const resBody = (await validRes.json()) as { status: string; received_events_count: number; dispatched: number };
+      const resBody = (await validRes.json()) as { status: string; received_events_count: number; dispatched: number; ignored_replays: number };
       expect(resBody.status).toBe("ok");
       expect(resBody.received_events_count).toBe(1);
       expect(resBody.dispatched).toBe(1);
+      expect(resBody.ignored_replays).toBe(0);
     });
   });
 

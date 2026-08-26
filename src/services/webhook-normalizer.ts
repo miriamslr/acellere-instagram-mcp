@@ -1,5 +1,6 @@
 export type NormalizedEventType =
   | "message_received"
+  | "message_edited"
   | "message_echo"
   | "message_reaction"
   | "message_seen"
@@ -26,14 +27,15 @@ export interface NormalizedWebhookEvent {
 export interface WebhookDispatchResult {
   dispatched: number;
   ignoredDuplicates: number;
+  ignoredReplays: number;
   errors?: string[];
 }
 
-export interface InstagramWebhookEventSink {
-  dispatch(events: NormalizedWebhookEvent[]): Promise<WebhookDispatchResult>;
+export interface WebhookEventDeduplicator {
+  isDuplicate(id: string, now?: number): boolean | Promise<boolean>;
 }
 
-export class InMemoryEventDeduplicator {
+export class InMemoryEventDeduplicator implements WebhookEventDeduplicator {
   private readonly seen = new Map<string, number>();
   private readonly ttlMs: number;
   private readonly maxEntries: number;
@@ -71,27 +73,40 @@ export class InMemoryEventDeduplicator {
   }
 }
 
-export class DefaultWebhookEventSink implements InstagramWebhookEventSink {
-  private readonly deduplicator: InMemoryEventDeduplicator;
+export interface CloudflareKVLike {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+}
 
-  constructor(deduplicator?: InMemoryEventDeduplicator) {
-    this.deduplicator = deduplicator ?? new InMemoryEventDeduplicator();
+export class KVEventDeduplicator implements WebhookEventDeduplicator {
+  private readonly kv: CloudflareKVLike;
+  private readonly ttlSeconds: number;
+  private readonly fallbackMemory: InMemoryEventDeduplicator;
+
+  constructor(kv: CloudflareKVLike, ttlSeconds: number = 3600) {
+    this.kv = kv;
+    this.ttlSeconds = ttlSeconds;
+    this.fallbackMemory = new InMemoryEventDeduplicator({ ttlMs: ttlSeconds * 1000 });
   }
 
-  public async dispatch(events: NormalizedWebhookEvent[]): Promise<WebhookDispatchResult> {
-    let dispatched = 0;
-    let ignoredDuplicates = 0;
-
-    for (const event of events) {
-      if (this.deduplicator.isDuplicate(event.id)) {
-        ignoredDuplicates++;
-        continue;
+  public async isDuplicate(id: string, now: number = Date.now()): Promise<boolean> {
+    try {
+      const key = `webhook_dedup:${id}`;
+      const existing = await this.kv.get(key);
+      if (existing !== null) {
+        return true;
       }
-      dispatched++;
+      await this.kv.put(key, String(now), { expirationTtl: this.ttlSeconds });
+      return false;
+    } catch {
+      // Graceful fallback to memory on KV failure
+      return this.fallbackMemory.isDuplicate(id, now);
     }
-
-    return { dispatched, ignoredDuplicates };
   }
+}
+
+export interface InstagramWebhookEventSink {
+  dispatch(events: NormalizedWebhookEvent[]): Promise<WebhookDispatchResult>;
 }
 
 /**
@@ -108,6 +123,47 @@ export function isTimestampWithinReplayWindow(
   return true;
 }
 
+export class DefaultWebhookEventSink implements InstagramWebhookEventSink {
+  private readonly deduplicator: WebhookEventDeduplicator;
+  private readonly maxAgeMs: number;
+  private readonly maxFutureSkewMs: number;
+
+  constructor(
+    deduplicator?: WebhookEventDeduplicator,
+    options?: { maxAgeMs?: number; maxFutureSkewMs?: number }
+  ) {
+    this.deduplicator = deduplicator ?? new InMemoryEventDeduplicator();
+    this.maxAgeMs = options?.maxAgeMs ?? 24 * 3600 * 1000;
+    this.maxFutureSkewMs = options?.maxFutureSkewMs ?? 5 * 60 * 1000;
+  }
+
+  public async dispatch(events: NormalizedWebhookEvent[]): Promise<WebhookDispatchResult> {
+    let dispatched = 0;
+    let ignoredDuplicates = 0;
+    let ignoredReplays = 0;
+
+    const now = Date.now();
+
+    for (const event of events) {
+      const eventTs = event.timestamp < 1e11 ? event.timestamp * 1000 : event.timestamp;
+      if (!isTimestampWithinReplayWindow(eventTs, now, this.maxAgeMs, this.maxFutureSkewMs)) {
+        ignoredReplays++;
+        continue;
+      }
+
+      const isDup = await this.deduplicator.isDuplicate(event.id, now);
+      if (isDup) {
+        ignoredDuplicates++;
+        continue;
+      }
+
+      dispatched++;
+    }
+
+    return { dispatched, ignoredDuplicates, ignoredReplays };
+  }
+}
+
 export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent[] {
   if (!body || typeof body !== "object") return [];
 
@@ -122,7 +178,7 @@ export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent
     const entryId = String(entry.id ?? "");
     const entryTime = typeof entry.time === "number" ? entry.time : Date.now();
 
-    // 1. Messaging events (Direct Messages, Reactions, Postbacks, Seen, Referrals, Handover)
+    // 1. Messaging events (Direct Messages, Edits, Reactions, Postbacks, Seen, Referrals, Handover)
     if (Array.isArray(entry.messaging)) {
       for (const msgItem of entry.messaging) {
         if (!msgItem || typeof msgItem !== "object") continue;
@@ -131,25 +187,71 @@ export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent
         const recipientId = (msg.recipient as { id?: string })?.id ?? entryId;
         const timestamp = typeof msg.timestamp === "number" ? msg.timestamp : entryTime;
 
-        if (msg.message) {
-          const msgDetails = msg.message as Record<string, unknown>;
-          const isEcho = Boolean(msgDetails.is_echo);
+        if (msg.message_edit) {
+          const editDetails = msg.message_edit as Record<string, unknown>;
           normalized.push({
-            id: String(msgDetails.mid ?? `${entryId}_${timestamp}`),
-            eventType: isEcho ? "message_echo" : "message_received",
+            id: String(editDetails.mid ?? `${entryId}_${timestamp}_edit`),
+            eventType: "message_edited",
             timestamp,
             recipientId,
             senderId,
             payload: {
-              mid: msgDetails.mid,
-              text: msgDetails.text,
-              attachments: msgDetails.attachments,
-              quick_reply: msgDetails.quick_reply,
-              is_echo: isEcho,
-              reply_to: msgDetails.reply_to,
+              mid: editDetails.mid,
+              text: editDetails.text,
+              num_edit: editDetails.num_edit,
             },
             raw: msgItem,
           });
+        } else if (msg.message) {
+          const msgDetails = msg.message as Record<string, unknown>;
+          const isEcho = Boolean(msgDetails.is_echo);
+          const isDeleted = Boolean(msgDetails.is_deleted);
+          const isSelf = Boolean(msgDetails.is_self);
+          const isUnsupported = Boolean(msgDetails.is_unsupported);
+          const numEdit = msgDetails.num_edit as number | undefined;
+
+          if (numEdit !== undefined && numEdit > 0) {
+            normalized.push({
+              id: String(msgDetails.mid ?? `${entryId}_${timestamp}_edit`),
+              eventType: "message_edited",
+              timestamp,
+              recipientId,
+              senderId,
+              payload: {
+                mid: msgDetails.mid,
+                text: msgDetails.text,
+                num_edit: numEdit,
+                is_echo: isEcho,
+                is_deleted: isDeleted,
+                is_self: isSelf,
+                is_unsupported: isUnsupported,
+              },
+              raw: msgItem,
+            });
+          } else {
+            normalized.push({
+              id: String(msgDetails.mid ?? `${entryId}_${timestamp}`),
+              eventType: isEcho ? "message_echo" : "message_received",
+              timestamp,
+              recipientId,
+              senderId,
+              payload: {
+                mid: msgDetails.mid,
+                text: msgDetails.text,
+                attachments: msgDetails.attachments,
+                quick_reply: msgDetails.quick_reply,
+                is_echo: isEcho,
+                is_deleted: isDeleted,
+                is_self: isSelf,
+                is_unsupported: isUnsupported,
+                referral: msgDetails.referral,
+                reply_to: msgDetails.reply_to,
+                commands: msgDetails.commands,
+                shares: msgDetails.shares,
+              },
+              raw: msgItem,
+            });
+          }
         } else if (msg.reaction) {
           const reactionDetails = msg.reaction as Record<string, unknown>;
           normalized.push({
@@ -224,62 +326,75 @@ export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent
       }
     }
 
-    // 3. Changes events (comments, live comments, mentions, story_insights)
+    // 3. Changes events (Form 1: entry.changes[]; Form 2: direct entry.field & entry.value)
+    const collectedChanges: Array<{ field: string; value: Record<string, unknown>; raw: unknown }> = [];
+
     if (Array.isArray(entry.changes)) {
       for (const changeItem of entry.changes) {
         if (!changeItem || typeof changeItem !== "object") continue;
         const change = changeItem as Record<string, unknown>;
-        const field = String(change.field ?? "");
-        const value = (change.value ?? {}) as Record<string, unknown>;
+        collectedChanges.push({
+          field: String(change.field ?? ""),
+          value: (change.value ?? {}) as Record<string, unknown>,
+          raw: changeItem,
+        });
+      }
+    } else if (entry.field !== undefined && entry.value !== undefined) {
+      collectedChanges.push({
+        field: String(entry.field),
+        value: (entry.value ?? {}) as Record<string, unknown>,
+        raw: entryItem,
+      });
+    }
 
-        if (field === "comments") {
-          normalized.push({
-            id: String(value.id ?? `${entryId}_${entryTime}_comment`),
-            eventType: "comment_created",
-            timestamp: entryTime,
-            recipientId: entryId,
-            senderId: (value.from as { id?: string })?.id,
-            payload: value,
-            raw: changeItem,
-          });
-        } else if (field === "live_comments") {
-          normalized.push({
-            id: String(value.id ?? `${entryId}_${entryTime}_live_comment`),
-            eventType: "live_comment",
-            timestamp: entryTime,
-            recipientId: entryId,
-            senderId: (value.from as { id?: string })?.id,
-            payload: value,
-            raw: changeItem,
-          });
-        } else if (field === "mentions") {
-          normalized.push({
-            id: String(value.comment_id ?? value.media_id ?? `${entryId}_${entryTime}_mention`),
-            eventType: "mention_received",
-            timestamp: entryTime,
-            recipientId: entryId,
-            payload: value,
-            raw: changeItem,
-          });
-        } else if (field === "story_insights") {
-          normalized.push({
-            id: String(value.media_id ?? `${entryId}_${entryTime}_story_insight`),
-            eventType: "story_insight",
-            timestamp: entryTime,
-            recipientId: entryId,
-            payload: value,
-            raw: changeItem,
-          });
-        } else {
-          normalized.push({
-            id: `${entryId}_${field}_${entryTime}`,
-            eventType: "unknown",
-            timestamp: entryTime,
-            recipientId: entryId,
-            payload: { field, value },
-            raw: changeItem,
-          });
-        }
+    for (const { field, value, raw } of collectedChanges) {
+      if (field === "comments") {
+        normalized.push({
+          id: String(value.id ?? `${entryId}_${entryTime}_comment`),
+          eventType: "comment_created",
+          timestamp: entryTime,
+          recipientId: entryId,
+          senderId: (value.from as { id?: string })?.id,
+          payload: value,
+          raw,
+        });
+      } else if (field === "live_comments") {
+        normalized.push({
+          id: String(value.id ?? `${entryId}_${entryTime}_live_comment`),
+          eventType: "live_comment",
+          timestamp: entryTime,
+          recipientId: entryId,
+          senderId: (value.from as { id?: string })?.id,
+          payload: value,
+          raw,
+        });
+      } else if (field === "mentions") {
+        normalized.push({
+          id: String(value.comment_id ?? value.media_id ?? `${entryId}_${entryTime}_mention`),
+          eventType: "mention_received",
+          timestamp: entryTime,
+          recipientId: entryId,
+          payload: value,
+          raw,
+        });
+      } else if (field === "story_insights") {
+        normalized.push({
+          id: String(value.media_id ?? `${entryId}_${entryTime}_story_insight`),
+          eventType: "story_insight",
+          timestamp: entryTime,
+          recipientId: entryId,
+          payload: value,
+          raw,
+        });
+      } else {
+        normalized.push({
+          id: `${entryId}_${field}_${entryTime}`,
+          eventType: "unknown",
+          timestamp: entryTime,
+          recipientId: entryId,
+          payload: { field, value },
+          raw,
+        });
       }
     }
   }

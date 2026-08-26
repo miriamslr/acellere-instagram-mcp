@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   INSTAGRAM_CAPABILITIES,
+  OFFICIAL_CAPABILITIES,
+  OFFICIAL_CAPABILITIES_COUNT,
+  ACELLERE_EXTENSIONS,
+  ACELLERE_EXTENSIONS_COUNT,
   isCapabilitySupported,
   requireInstagramCapability,
   getCapabilitiesSummary,
@@ -10,7 +14,10 @@ import {
 describe("Instagram Capabilities Matrix", () => {
   it("defines comprehensive capabilities with valid metadata and surface separation", () => {
     const capabilities = Object.values(INSTAGRAM_CAPABILITIES);
-    expect(capabilities.length).toBeGreaterThanOrEqual(45);
+    expect(capabilities.length).toBe(OFFICIAL_CAPABILITIES_COUNT + ACELLERE_EXTENSIONS_COUNT);
+    expect(OFFICIAL_CAPABILITIES_COUNT).toBe(74);
+    expect(ACELLERE_EXTENSIONS_COUNT).toBe(6);
+    expect(capabilities.length).toBe(80);
 
     for (const cap of capabilities) {
       expect(cap.id).toBeDefined();
@@ -32,6 +39,10 @@ describe("Instagram Capabilities Matrix", () => {
     // Business discovery is Facebook Login only
     expect(isCapabilitySupported("facebook-login", "discovery.profile")).toBe(true);
     expect(isCapabilitySupported("instagram-login", "discovery.profile")).toBe(false);
+
+    // Resumable upload is Facebook Login for Business only
+    expect(isCapabilitySupported("facebook-login", "publishing.resumableUpload")).toBe(true);
+    expect(isCapabilitySupported("instagram-login", "publishing.resumableUpload")).toBe(false);
 
     // Hashtags are Facebook Login only
     expect(isCapabilitySupported("facebook-login", "hashtags.search")).toBe(true);
@@ -68,18 +79,23 @@ describe("Instagram Capabilities Matrix", () => {
     }
   });
 
-  it("generates structured capabilities summary separating official surface from Acellere extensions", () => {
+  it("generates structured capabilities summary separating official surface from Acellere extensions with deterministic counts", () => {
     const fbSummary = getCapabilitiesSummary("facebook-login");
     expect(fbSummary.login_mode).toBe("facebook-login");
-    expect(fbSummary.official_surface.total).toBeGreaterThan(35);
-    expect(fbSummary.official_surface.available_count).toBeGreaterThan(35);
-    expect(fbSummary.acellere_extensions.total).toBe(6);
-    expect(fbSummary.acellere_extensions.available_count).toBe(6);
+    expect(fbSummary.official_surface.total).toBe(OFFICIAL_CAPABILITIES_COUNT);
+    const fbOfficialExpectedAvailable = OFFICIAL_CAPABILITIES.filter((c) => c.facebookLogin).length;
+    expect(fbSummary.official_surface.available_count).toBe(fbOfficialExpectedAvailable);
+    expect(fbSummary.official_surface.unavailable_count).toBe(OFFICIAL_CAPABILITIES_COUNT - fbOfficialExpectedAvailable);
+    expect(fbSummary.official_surface.coverage_percentage).toBe(Math.round((fbOfficialExpectedAvailable / OFFICIAL_CAPABILITIES_COUNT) * 100));
+
+    expect(fbSummary.acellere_extensions.total).toBe(ACELLERE_EXTENSIONS_COUNT);
+    expect(fbSummary.acellere_extensions.available_count).toBe(ACELLERE_EXTENSIONS.filter((c) => c.facebookLogin).length);
 
     const igSummary = getCapabilitiesSummary("instagram-login");
     expect(igSummary.login_mode).toBe("instagram-login");
-    expect(igSummary.official_surface.total).toBe(fbSummary.official_surface.total);
-    expect(igSummary.official_surface.available_count).toBeGreaterThan(20);
-    expect(igSummary.official_surface.unavailable_count).toBeGreaterThan(5);
+    expect(igSummary.official_surface.total).toBe(OFFICIAL_CAPABILITIES_COUNT);
+    const igOfficialExpectedAvailable = OFFICIAL_CAPABILITIES.filter((c) => c.instagramLogin).length;
+    expect(igSummary.official_surface.available_count).toBe(igOfficialExpectedAvailable);
+    expect(igSummary.official_surface.unavailable_count).toBe(OFFICIAL_CAPABILITIES_COUNT - igOfficialExpectedAvailable);
   });
 });

@@ -653,6 +653,13 @@ export class MetaClient {
     });
   }
 
+  get igAccessToken(): string {
+    if (!this.config.instagramAccessToken) {
+      throw new Error("INSTAGRAM_ACCESS_TOKEN is not configured.");
+    }
+    return this.config.instagramAccessToken;
+  }
+
   get igUserId(): string {
     if (!this.config.instagramUserId) {
       throw new Error("INSTAGRAM_USER_ID is not configured.");

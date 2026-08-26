@@ -147,6 +147,8 @@ describe("MCP tool annotations", () => {
       "ig_publish_reel",
       "ig_publish_story",
       "ig_create_resumable_upload_session",
+      "ig_upload_resumable_binary",
+      "ig_publish_resumable_video",
       "ig_post_comment",
       "ig_reply_to_comment",
       "ig_send_private_reply",
@@ -207,7 +209,7 @@ describe("MCP tool annotations", () => {
     });
   });
 
-  it("covers all 118 registered tools across the four categories", () => {
-    expect(server.tools.size).toBe(118);
+  it("covers all 120 registered tools across the four categories", () => {
+    expect(server.tools.size).toBe(120);
   });
 });

@@ -508,8 +508,8 @@ describe("ig_get_conversations mode-aware routing with AcellereMetaClient", () =
       text: "Choose an option:",
       quick_replies: [
         { content_type: "text", title: "Pricing", payload: "PAYLOAD_PRICING" },
-        { content_type: "user_phone_number" },
-        { content_type: "user_email" },
+        { content_type: "user_phone_number", title: "Send Phone", payload: "PHONE_PAYLOAD" },
+        { content_type: "user_email", title: "Send Email", payload: "EMAIL_PAYLOAD" },
       ],
     });
 
@@ -522,9 +522,55 @@ describe("ig_get_conversations mode-aware routing with AcellereMetaClient", () =
     });
     expect(call[3].jsonBody.message.quick_replies[1]).toEqual({
       content_type: "user_phone_number",
+      title: "Send Phone",
+      payload: "PHONE_PAYLOAD",
     });
     expect(call[3].jsonBody.message.quick_replies[2]).toEqual({
       content_type: "user_email",
+      title: "Send Email",
+      payload: "EMAIL_PAYLOAD",
+    });
+  });
+
+  it("ig_send_generic_template supports default_action on elements", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient({
+      ig: vi.fn(async () => ({
+        data: { recipient_id: "user_456", message_id: "m_gen" },
+        rateLimit: undefined,
+      })),
+    });
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_generic_template", {
+      recipient_id: "user_456",
+      elements: [
+        {
+          title: "Acellere AI Platform",
+          subtitle: "Enterprise Marketing Automation",
+          image_url: "https://example.com/banner.png",
+          default_action: {
+            type: "web_url",
+            url: "https://acellere.ai/dashboard",
+            webview_height_ratio: "tall",
+          },
+          buttons: [
+            {
+              type: "web_url",
+              title: "Explore",
+              url: "https://acellere.ai/explore",
+            },
+          ],
+        },
+      ],
+    });
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    const element = call[3].jsonBody.message.attachment.payload.elements[0];
+    expect(element.default_action).toEqual({
+      type: "web_url",
+      url: "https://acellere.ai/dashboard",
+      webview_height_ratio: "tall",
     });
   });
 

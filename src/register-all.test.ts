@@ -42,6 +42,8 @@ describe("registerAll", () => {
       "ig_get_container_status",
       "ig_get_content_publishing_limit",
       "ig_create_resumable_upload_session",
+      "ig_upload_resumable_binary",
+      "ig_publish_resumable_video",
       "ig_get_media_list",
       "ig_get_media",
       "ig_delete_media",
