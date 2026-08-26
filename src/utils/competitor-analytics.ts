@@ -154,6 +154,10 @@ const HOUR_SLOTS = [
   { key: "evening", label: "18:00 - 23:59 (Evening)", start: 18, end: 23 },
 ];
 
+const DAY_MS = 1000 * 60 * 60 * 24;
+const MIN_FREQUENCY_SAMPLE_POSTS = 3;
+const MIN_FREQUENCY_WINDOW_MS = 3 * DAY_MS;
+
 function summarizeNumbers(arr: number[]): MetricSummary {
   if (arr.length === 0) {
     return { average: 0, median: 0, min: 0, max: 0, total: 0 };
@@ -233,12 +237,11 @@ export function analyzeCompetitorMedia(
   if (firstTimestamp !== undefined && lastTimestamp !== undefined) {
     startIso = new Date(firstTimestamp).toISOString();
     endIso = new Date(lastTimestamp).toISOString();
-    const diffMs = Math.max(1000, lastTimestamp - firstTimestamp);
-    durationDays = Number((diffMs / (1000 * 60 * 60 * 24)).toFixed(2));
-    if (timestamps.length > 1) {
-      const effectiveDays = Math.max(1, durationDays);
-      postsPerWeek = Number(((postsAnalyzed / effectiveDays) * 7).toFixed(2));
+    const observedSpanMs = Math.max(0, lastTimestamp - firstTimestamp);
+    const displaySpanMs = Math.max(1000, observedSpanMs);
+    durationDays = Number((displaySpanMs / DAY_MS).toFixed(2));
 
+    if (timestamps.length > 1) {
       const intervals: number[] = [];
       for (let i = 1; i < timestamps.length; i++) {
         const curr = timestamps[i];
@@ -248,6 +251,15 @@ export function analyzeCompetitorMedia(
         }
       }
       avgIntervalHours = calculateMean(intervals);
+    }
+
+    if (
+      timestamps.length >= MIN_FREQUENCY_SAMPLE_POSTS &&
+      observedSpanMs >= MIN_FREQUENCY_WINDOW_MS
+    ) {
+      const observedIntervals = timestamps.length - 1;
+      const observedSpanDays = observedSpanMs / DAY_MS;
+      postsPerWeek = Number(((observedIntervals / observedSpanDays) * 7).toFixed(2));
     }
   }
 
