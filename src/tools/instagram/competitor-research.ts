@@ -228,7 +228,7 @@ export function registerIgCompetitorResearchTools(
               const message = err instanceof Error ? err.message : String(err);
               let status: CompetitorResearchAccountDetail["status"] = "error";
 
-              if (/not found|does not exist|non-existent/i.test(message)) {
+              if (/not found|does not exist|non-existent|invalid user id|invalid target/i.test(message)) {
                 status = "not_found";
               } else if (/unsupported|personal|permission|capability|not eligible|not (?:a )?(?:business|creator|professional)|(?:business|creator|professional) account (?:is )?required/i.test(message)) {
                 status = "unsupported";
@@ -251,17 +251,7 @@ export function registerIgCompetitorResearchTools(
           return {
             username: acc.username,
             status: acc.status,
-            error_message: acc.error_message,
-            followers_count: 0,
-            posts_analyzed: 0,
-            posts_per_week: 0,
-            public_engagement_rate: { average: 0, median: 0 },
-            average_likes: 0,
-            average_comments: 0,
-            average_views: null,
-            reels_percentage: 0,
-            carousel_percentage: 0,
-            image_percentage: 0,
+            error_message: acc.error_message ?? "Competitor research failed without an error message.",
           };
         });
 

@@ -222,6 +222,9 @@ describe("ig_competitor_research tool", () => {
     expect(payload.accounts_detail[0].status).toBe("error");
     expect(payload.accounts_detail[0].error_message).toContain("Meta returned no public media");
     expect(payload.accounts_detail[0].analysis).toBeUndefined();
+    expect(payload.benchmark_summary.accounts_overview[0].status).toBe("error");
+    expect(payload.benchmark_summary.accounts_overview[0]).not.toHaveProperty("followers_count");
+    expect(payload.benchmark_summary.accounts_overview[0]).not.toHaveProperty("posts_analyzed");
   });
 
   it("isolates errors for failed accounts during multi-account research", async () => {
@@ -238,5 +241,8 @@ describe("ig_competitor_research tool", () => {
 
     expect(payload.accounts_detail[0].status).toBe("ok");
     expect(payload.accounts_detail[1].status).toBe("not_found");
+    expect(payload.benchmark_summary.accounts_overview[1].status).toBe("not_found");
+    expect(payload.benchmark_summary.accounts_overview[1]).not.toHaveProperty("followers_count");
+    expect(payload.benchmark_summary.accounts_overview[1]).not.toHaveProperty("average_comments");
   });
 });

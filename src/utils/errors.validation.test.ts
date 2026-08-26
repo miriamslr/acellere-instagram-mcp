@@ -45,4 +45,26 @@ describe("Meta API OAuthException classification precedence", () => {
 
     expect(errorType(error)).toBe("rate_limit");
   });
+  it("classifies Business Discovery invalid target as not_found, not auth", () => {
+    const error = new MetaApiError({
+      message: "Invalid user id",
+      httpStatus: 400,
+      apiCode: 110,
+      apiSubcode: 2207013,
+      apiType: "OAuthException",
+      endpoint: "/123456",
+      method: "GET",
+    });
+
+    const result = formatErrorResponse(error, "Get business media");
+    const payload = JSON.parse(result.content[0].text) as {
+      error_type: string;
+      remediation?: string;
+    };
+
+    expect(payload.error_type).toBe("not_found");
+    expect(payload.remediation).toContain("target Instagram username");
+    expect(payload.remediation).not.toContain("meta_exchange_token");
+  });
+
 });

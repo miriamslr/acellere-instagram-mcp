@@ -1,7 +1,15 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { HttpMethod } from "../services/meta-client.js";
 
-export type ErrorType = "auth" | "permission" | "validation" | "rate_limit" | "server" | "network" | "internal";
+export type ErrorType =
+  | "auth"
+  | "permission"
+  | "validation"
+  | "not_found"
+  | "rate_limit"
+  | "server"
+  | "network"
+  | "internal";
 
 interface MetaApiErrorInit {
   message: string;
@@ -77,6 +85,14 @@ const PERMISSION_CODES = new Set([10]);
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 341, 613]);
 const VALIDATION_CODES = new Set([100, 200, 803]);
 const SERVER_CODES = new Set([1, 2]);
+const INVALID_TARGET_SUBCODES = new Set([2207013]);
+
+function isInvalidTarget(error: MetaApiError): boolean {
+  return (
+    (error.apiSubcode !== undefined && INVALID_TARGET_SUBCODES.has(error.apiSubcode)) ||
+    (error.apiCode === 110 && /invalid user id/i.test(error.message))
+  );
+}
 
 function isBusinessUseCaseRateLimit(code?: number): boolean {
   return typeof code === "number" && code >= 80001 && code <= 80008;
@@ -99,6 +115,13 @@ function categorize(error: unknown): ErrorType {
       isBusinessUseCaseRateLimit(apiCode)
     ) {
       return "rate_limit";
+    }
+    // Business Discovery can return OAuthException for an invalid target account.
+    // This is a target lookup failure, not an authentication failure, so keep it
+    // ahead of the generic OAuthException fallback to avoid telling callers to
+    // rotate a healthy access token.
+    if (isInvalidTarget(error)) {
+      return "not_found";
     }
     // Meta frequently uses type="OAuthException" for request-shape and field
     // validation errors too. Explicit API codes are more specific than the
@@ -138,6 +161,7 @@ function categorize(error: unknown): ErrorType {
 const REMEDIATION: Partial<Record<ErrorType, string>> = {
   auth: "Refresh the access token via meta_exchange_token (short→long) or meta_refresh_token (long→long), or generate a new token from the Meta App dashboard. The token may be expired, revoked, or scoped incorrectly.",
   permission: "Review the permissions and product capabilities required by this Meta endpoint, including access level/App Review where applicable. If you add scopes or capabilities, reauthorize the app and then update the token; do not rotate an otherwise healthy token solely for this error.",
+  not_found: "Verify the target Instagram username and confirm that the account exists and is eligible for the requested Business Discovery operation. Do not rotate a healthy access token for this error.",
   rate_limit: "Retry after a delay with exponential backoff. Inspect the _rateLimit field on prior successful responses to gauge headroom; consider reducing call volume or batching.",
   server: "Transient Meta server issue — retry with exponential backoff. If it persists, check status.dev.facebook.com.",
   network: "Network error or timeout reaching the Meta API. Retry with exponential backoff; verify outbound connectivity.",

@@ -164,6 +164,9 @@ describe("ig_compare_businesses tool", () => {
     expect(payload.summary.failed_accounts).toBe(1);
     expect(payload.accounts[0].status).toBe("error");
     expect(payload.accounts[0].error_message).toContain("Meta returned no public media");
+    expect(payload.accounts[0]).not.toHaveProperty("followers_count");
+    expect(payload.accounts[0]).not.toHaveProperty("posts_analyzed");
+    expect(payload.accounts[0]).not.toHaveProperty("public_engagement_rate");
   });
 
   it("handles partial failure without failing the entire comparison", async () => {
@@ -181,6 +184,8 @@ describe("ig_compare_businesses tool", () => {
     expect(payload.accounts[0].status).toBe("ok");
     expect(payload.accounts[1].status).toBe("not_found");
     expect(payload.accounts[1].error_message).toContain("does not exist");
+    expect(payload.accounts[1]).not.toHaveProperty("followers_count");
+    expect(payload.accounts[1]).not.toHaveProperty("average_likes");
 
     expect(payload.leaders.followers.username).toBe("brand_one");
   });
