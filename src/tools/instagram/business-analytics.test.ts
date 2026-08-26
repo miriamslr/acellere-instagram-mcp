@@ -107,6 +107,32 @@ describe("ig_analyze_business tool", () => {
     expect(payload._rateLimit).toEqual({ callCount: 3 });
   });
 
+  it("does not convert a failed media collection into zero-valued analytics", async () => {
+    (client.ig as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: {
+        raw: JSON.stringify({
+          business_discovery: {
+            id: "1784140001",
+            username: "targetbrand",
+            followers_count: 5000,
+            media_count: 40,
+            media: { data: [] },
+          },
+        }),
+        success: true,
+      },
+    });
+
+    const handler = server.tools.get("ig_analyze_business");
+    const result = (await handler!({ username: "targetbrand" })) as {
+      isError?: boolean;
+      content: { type: string; text: string }[];
+    };
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Meta returned no public media");
+  });
+
   it("handles errors gracefully with isError result", async () => {
     (client.ig as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("Meta API error: account restricted")

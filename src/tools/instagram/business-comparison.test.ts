@@ -89,6 +89,23 @@ function makeMockClient(): MetaClient {
         };
       }
 
+      if (fields.includes("business_discovery.username(brand_empty)")) {
+        return {
+          data: {
+            raw: JSON.stringify({
+              business_discovery: {
+                id: "1003",
+                username: "brand_empty",
+                followers_count: 9000,
+                media_count: 25,
+                media: { data: [] },
+              },
+            }),
+            success: true,
+          },
+        };
+      }
+
       if (fields.includes("business_discovery.username(brand_invalid)")) {
         throw new Error("Meta API error: User does not exist");
       }
@@ -134,6 +151,19 @@ describe("ig_compare_businesses tool", () => {
     expect(payload.leaders.followers.username).toBe("brand_one");
     expect(payload.leaders.public_engagement_rate.username).toBe("brand_two");
     expect(payload.leaders.public_engagement_rate.value).toBe(11);
+  });
+
+  it("marks media collection failure as error instead of an ok account with zero metrics", async () => {
+    const handler = server.tools.get("ig_compare_businesses");
+    const result = (await handler!({ usernames: ["brand_empty"] })) as {
+      content: { type: string; text: string }[];
+    };
+
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.summary.successful_accounts).toBe(0);
+    expect(payload.summary.failed_accounts).toBe(1);
+    expect(payload.accounts[0].status).toBe("error");
+    expect(payload.accounts[0].error_message).toContain("Meta returned no public media");
   });
 
   it("handles partial failure without failing the entire comparison", async () => {

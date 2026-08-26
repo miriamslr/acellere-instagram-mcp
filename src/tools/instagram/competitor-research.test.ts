@@ -98,6 +98,23 @@ function makeMockClient(): MetaClient {
         };
       }
 
+      if (fields.includes("business_discovery.username(brand_empty)")) {
+        return {
+          data: {
+            raw: JSON.stringify({
+              business_discovery: {
+                id: "1003",
+                username: "brand_empty",
+                followers_count: 12000,
+                media_count: 60,
+                media: { data: [] },
+              },
+            }),
+            success: true,
+          },
+        };
+      }
+
       if (fields.includes("business_discovery.username(brand_ghost)")) {
         throw new Error("Meta API error: User does not exist");
       }
@@ -191,6 +208,20 @@ describe("ig_competitor_research tool", () => {
     expect(history.followers_start).toBe(48000);
     expect(history.followers_end).toBe(50000);
     expect(history.followers_delta_percentage).toBe(4.17);
+  });
+
+  it("marks an empty failed media collection as error instead of successful zero data", async () => {
+    const handler = server.tools.get("ig_competitor_research");
+    const result = (await handler!({ usernames: ["brand_empty"] })) as {
+      content: { type: string; text: string }[];
+    };
+
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.research_metadata.accounts_successful).toBe(0);
+    expect(payload.research_metadata.accounts_failed).toBe(1);
+    expect(payload.accounts_detail[0].status).toBe("error");
+    expect(payload.accounts_detail[0].error_message).toContain("Meta returned no public media");
+    expect(payload.accounts_detail[0].analysis).toBeUndefined();
   });
 
   it("isolates errors for failed accounts during multi-account research", async () => {

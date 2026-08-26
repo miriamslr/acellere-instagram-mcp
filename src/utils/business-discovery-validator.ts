@@ -51,6 +51,10 @@ export function extractRootFieldName(fieldToken: string): string {
   return name.toLowerCase();
 }
 
+function containsExactFieldIdentifier(token: string, field: string): boolean {
+  return new RegExp(`\\b${field}\\b`).test(token);
+}
+
 /**
  * Validates requested Business Discovery fields against the allowlist and known
  * unsupported third-party fields.
@@ -81,7 +85,7 @@ export function validateBusinessDiscoveryFields(fieldsStr: string): BusinessDisc
 
     // Check for nested unsupported expressions like `comments{...}`, `insights{...}`
     for (const unsupported of IG_BUSINESS_DISCOVERY_UNSUPPORTED_FIELDS) {
-      if (token.includes(unsupported) && !unsupportedFields.includes(unsupported)) {
+      if (containsExactFieldIdentifier(token, unsupported) && !unsupportedFields.includes(unsupported)) {
         unsupportedFields.push(unsupported);
       }
     }
