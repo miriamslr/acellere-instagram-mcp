@@ -37,9 +37,38 @@ export const collaboratorsSchema = z
     message: "Collaborator usernames must be unique",
   })
   .optional()
-  .describe(
-    "Optional. Up to 3 unique Instagram usernames to invite as collaborators. Per Instagram Graph API: supported for Feed image, Reels, and Carousels — not supported for Stories. Leading '@' characters and surrounding whitespace are auto-stripped before the uniqueness check."
-  );
+export const MAX_SAFE_VIDEO_BASE64_BYTES = 8 * 1024 * 1024; // 8 MB
+
+/**
+ * Preflights and decodes a base64 video string into a Uint8Array.
+ * Enforces memory safety checks BEFORE calling atob() to avoid creating large strings in memory.
+ */
+export function decodeVideoBase64Preflight(base64Str: string): Uint8Array {
+  const cleanLength = base64Str.trim().length;
+  const padding = base64Str.endsWith("==") ? 2 : base64Str.endsWith("=") ? 1 : 0;
+  const estimatedBytes = Math.max(0, Math.floor((cleanLength * 3) / 4) - padding);
+
+  if (estimatedBytes > MAX_SAFE_VIDEO_BASE64_BYTES) {
+    throw new Error(
+      `Base64 video payload exceeds maximum safe memory limit (8 MB, estimated ${(estimatedBytes / (1024 * 1024)).toFixed(2)} MB). ` +
+      `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
+    );
+  }
+
+  const binaryStr = atob(base64Str);
+  if (binaryStr.length > MAX_SAFE_VIDEO_BASE64_BYTES) {
+    throw new Error(
+      `Base64 video payload exceeds maximum safe memory limit (8 MB, got ${(binaryStr.length / (1024 * 1024)).toFixed(2)} MB). ` +
+      `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
+    );
+  }
+
+  const buffer = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    buffer[i] = binaryStr.charCodeAt(i);
+  }
+  return buffer;
+}
 
 export function registerIgPublishingTools(server: McpServer, client: MetaClient): void {
   // ─── ig_publish_photo ────────────────────────────────────────
@@ -334,6 +363,344 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
         return formatResponse(data, rateLimit);
       } catch (error) {
         return formatErrorResponse(error, "Get container status");
+      }
+    }
+  );
+
+  // ─── ig_get_content_publishing_limit ─────────────────────────
+  server.registerTool(
+    "ig_get_content_publishing_limit",
+    {
+      description:
+        "Check remaining Instagram content publishing quota and rate limit duration for the account. " +
+        "Meta limits accounts to 100 published posts per 24-hour rolling window. Read-only.",
+      inputSchema: {
+        since: z.number().optional().describe("Unix timestamp for start of rate limit period"),
+        until: z.number().optional().describe("Unix timestamp for end of rate limit period"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ since, until }) => {
+      try {
+        const params = buildParams(
+          {
+            fields: "config,quota_usage",
+          },
+          { since, until }
+        );
+        const { data, rateLimit } = await client.ig(
+          "GET",
+          `/${client.igUserId}/content_publishing_limit`,
+          params
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get content publishing limit");
+      }
+    }
+  );
+
+  // ─── ig_create_resumable_upload_session ─────────────────────
+  server.registerTool(
+    "ig_create_resumable_upload_session",
+    {
+      description:
+        "Create a resumable upload session container for Reels or Stories via upload_type=resumable. " +
+        "Returns the created container ID and the resumable upload URI (rupload.facebook.com) for binary chunk streaming. Write.",
+      inputSchema: {
+        media_type: z.enum(["REELS", "STORIES"]).optional().default("REELS").describe("Media type (default: REELS)"),
+        caption: captionSchema.describe("Post caption (max 2200 chars)"),
+        cover_url: httpsUrl.optional().describe("Cover image URL"),
+        thumb_offset: z.number().optional().describe("Thumbnail offset in ms"),
+        location_id: z.string().optional().describe("Facebook Page location ID"),
+        share_to_feed: z.boolean().optional().describe("Share Reel to main feed (default: true)"),
+        collaborators: collaboratorsSchema,
+        audio_name: z.string().optional().describe("Custom audio name for Reel"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ media_type, caption, cover_url, thumb_offset, location_id, share_to_feed, collaborators, audio_name }) => {
+      try {
+        client.requireInstagramCapability("publishing.resumableUpload");
+
+        const params = buildParams(
+          {
+            upload_type: "resumable",
+            media_type,
+          },
+          {
+            caption,
+            cover_url,
+            thumb_offset,
+            location_id,
+            share_to_feed,
+            collaborators: collaborators?.length ? JSON.stringify(collaborators) : undefined,
+            audio_name,
+          }
+        );
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/media`,
+          params
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Create resumable upload session");
+      }
+    }
+  );
+
+  // ─── ig_upload_resumable_binary ──────────────────────────────
+  server.registerTool(
+    "ig_upload_resumable_binary",
+    {
+      description:
+        "Transfer raw video binary data to rupload.facebook.com upload URI for an existing resumable session. " +
+        "Accepts a public HTTPS video_url to stream from or base64-encoded video_data with offset support. Write.",
+      inputSchema: {
+        upload_uri: z.string().url().describe("The rupload.facebook.com URI returned from session creation"),
+        video_url: httpsUrl.optional().describe("Public HTTPS URL of the video file to download and stream to Meta"),
+        video_base64: z.string().optional().describe("Base64-encoded raw video binary bytes"),
+        offset: z.number().int().min(0).optional().default(0).describe("Byte offset to start upload (must be integer >= 0, default: 0)"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ upload_uri, video_url, video_base64, offset = 0 }) => {
+      try {
+        client.requireInstagramCapability("publishing.resumableUpload");
+
+        if (!Number.isInteger(offset) || offset < 0) {
+          return formatErrorResponse(new Error(`offset must be an integer >= 0 (got ${offset})`), "Upload resumable binary");
+        }
+
+        if (!video_url && !video_base64) {
+          return formatErrorResponse(new Error("Either video_url or video_base64 must be provided"), "Upload resumable binary");
+        }
+
+        let body: BodyInit;
+        let fileSize: number;
+
+        if (video_url) {
+          if (offset === 0) {
+            const sourceRes = await fetch(video_url);
+            if (!sourceRes.ok && sourceRes.status !== 206) {
+              throw new Error(`Failed to fetch source video from ${video_url}: HTTP ${sourceRes.status}`);
+            }
+
+            if (sourceRes.status === 206 && sourceRes.headers.get("content-range")) {
+              const range = sourceRes.headers.get("content-range")!;
+              const match = range.trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+)$/i);
+              if (match) {
+                fileSize = Number(match[3]);
+              } else {
+                const cl = sourceRes.headers.get("content-length");
+                if (!cl) throw new Error(`Source video at ${video_url} did not provide a Content-Length or Content-Range header.`);
+                fileSize = Number(cl);
+              }
+            } else {
+              const cl = sourceRes.headers.get("content-length");
+              if (!cl) {
+                throw new Error(`Source video at ${video_url} did not provide a Content-Length header.`);
+              }
+              fileSize = Number(cl);
+            }
+
+            if (!sourceRes.body) {
+              throw new Error(`Source video at ${video_url} returned an empty body.`);
+            }
+            body = sourceRes.body as unknown as BodyInit;
+          } else {
+            const sourceRes = await fetch(video_url, {
+              headers: { Range: `bytes=${offset}-` },
+            });
+
+            if (sourceRes.status === 200) {
+              throw new Error(
+                `Failed to resume video upload: origin server at ${video_url} ignored Range header and returned HTTP 200 instead of HTTP 206 Partial Content.`
+              );
+            }
+
+            if (sourceRes.status !== 206) {
+              throw new Error(
+                `Failed to fetch video chunk from ${video_url}: expected HTTP 206 Partial Content, got HTTP ${sourceRes.status}.`
+              );
+            }
+
+            const contentRange = sourceRes.headers.get("content-range");
+            if (!contentRange) {
+              throw new Error(`Origin server at ${video_url} returned HTTP 206 without a Content-Range header.`);
+            }
+
+            const match = contentRange.trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+)$/i);
+            if (!match) {
+              throw new Error(
+                `Invalid Content-Range header format: "${contentRange}". Expected "bytes START-END/TOTAL".`
+              );
+            }
+
+            const rangeStart = Number(match[1]);
+            const rangeEnd = Number(match[2]);
+            const totalSize = Number(match[3]);
+
+            if (rangeStart !== offset) {
+              throw new Error(
+                `Content-Range start (${rangeStart}) does not match requested offset (${offset}).`
+              );
+            }
+
+            if (rangeEnd < rangeStart) {
+              throw new Error(
+                `Invalid Content-Range: end (${rangeEnd}) is less than start (${rangeStart}).`
+              );
+            }
+
+            if (totalSize <= 0 || !Number.isInteger(totalSize)) {
+              throw new Error(`Invalid Content-Range total file size: ${match[3]}.`);
+            }
+
+            fileSize = totalSize;
+
+            if (!sourceRes.body) {
+              throw new Error(`Source video at ${video_url} returned an empty body.`);
+            }
+            body = sourceRes.body as unknown as BodyInit;
+          }
+        } else {
+          const buffer = decodeVideoBase64Preflight(video_base64!);
+          const totalFileSize = buffer.byteLength;
+
+          if (offset > totalFileSize) {
+            throw new Error(
+              `Offset (${offset}) exceeds total video file size (${totalFileSize} bytes).`
+            );
+          }
+
+          const chunk = offset > 0 ? buffer.subarray(offset) : buffer;
+          fileSize = totalFileSize;
+          body = chunk as unknown as BodyInit;
+        }
+
+        const result = await client.uploadResumableBinary({
+          uploadUri: upload_uri,
+          body,
+          offset,
+          fileSize,
+        });
+
+        return formatResponse(result);
+      } catch (error) {
+        return formatErrorResponse(error, "Upload resumable binary");
+      }
+    }
+  );
+
+  // ─── ig_publish_resumable_video ──────────────────────────────
+  server.registerTool(
+    "ig_publish_resumable_video",
+    {
+      description:
+        "Complete end-to-end resumable video publishing for Reels or Stories: creates session, streams binary to rupload.facebook.com, polls status until FINISHED, and publishes. Write.",
+      inputSchema: {
+        video_url: httpsUrl.optional().describe("Public HTTPS URL of the video to publish"),
+        video_base64: z.string().optional().describe("Base64 encoded video binary data"),
+        media_type: z.enum(["REELS", "STORIES"]).optional().default("REELS").describe("Media type (default: REELS)"),
+        caption: captionSchema.describe("Post caption (max 2200 chars)"),
+        cover_url: httpsUrl.optional().describe("Cover image URL"),
+        thumb_offset: z.number().optional().describe("Thumbnail offset in ms"),
+        location_id: z.string().optional().describe("Facebook Page location ID"),
+        share_to_feed: z.boolean().optional().describe("Share Reel to main feed (default: true)"),
+        collaborators: collaboratorsSchema,
+        audio_name: z.string().optional().describe("Custom audio name for Reel"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ video_url, video_base64, media_type, caption, cover_url, thumb_offset, location_id, share_to_feed, collaborators, audio_name }, extra?: ProgressExtra) => {
+      let step = "session creation";
+      let containerId: string | undefined;
+
+      try {
+        client.requireInstagramCapability("publishing.resumableUpload");
+
+        if (!video_url && !video_base64) {
+          return formatErrorResponse(new Error("Either video_url or video_base64 must be provided"), "Publish resumable video");
+        }
+
+        // Step 1: Create resumable session
+        const sessionParams = buildParams(
+          {
+            upload_type: "resumable",
+            media_type,
+          },
+          {
+            caption,
+            cover_url,
+            thumb_offset,
+            location_id,
+            share_to_feed,
+            collaborators: collaborators?.length ? JSON.stringify(collaborators) : undefined,
+            audio_name,
+          }
+        );
+
+        const sessionRes = await client.ig("POST", `/${client.igUserId}/media`, sessionParams);
+        const sessionData = sessionRes.data as { id: string; uri: string };
+        containerId = sessionData.id;
+        const uploadUri = sessionData.uri;
+
+        // Step 2: Upload binary to rupload.facebook.com via client gateway
+        step = "binary transfer";
+        let body: BodyInit;
+        let fileSize: number;
+
+        if (video_url) {
+          const sourceRes = await fetch(video_url);
+          if (!sourceRes.ok) throw new Error(`Failed to download source video: HTTP ${sourceRes.status}`);
+          const cl = sourceRes.headers.get("content-length");
+          if (!cl) {
+            throw new Error(`Source video at ${video_url} did not provide a Content-Length header.`);
+          }
+          fileSize = Number(cl);
+          if (!sourceRes.body) {
+            throw new Error(`Source video at ${video_url} returned an empty body.`);
+          }
+          body = sourceRes.body as unknown as BodyInit;
+        } else {
+          const buffer = decodeVideoBase64Preflight(video_base64!);
+          fileSize = buffer.byteLength;
+          body = buffer as unknown as BodyInit;
+        }
+
+        await client.uploadResumableBinary({
+          uploadUri,
+          body,
+          offset: 0,
+          fileSize,
+        });
+
+        // Step 3: Wait for container processing
+        step = "processing";
+        await waitForIgContainer(client, containerId, VIDEO_PROCESSING_TIMEOUT, { onProgress: makeProgressNotifier(extra) });
+
+        // Step 4: Publish container
+        step = "publishing";
+        const publishRes = await client.ig("POST", `/${client.igUserId}/media_publish`, {
+          creation_id: containerId,
+        });
+
+        client.invalidateCache(IG_PROFILE_CACHE_PREFIX);
+        return formatResponse(
+          {
+            ...publishRes.data,
+            container_id: containerId,
+            status: "published",
+          },
+          publishRes.rateLimit
+        );
+      } catch (error) {
+        return formatErrorResponse(error, "Publish resumable video", {
+          containerId,
+          step,
+        });
       }
     }
   );

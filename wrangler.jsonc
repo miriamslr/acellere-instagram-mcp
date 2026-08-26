@@ -10,6 +10,35 @@
   "observability": {
     "enabled": true
   },
+  "kv_namespaces": [
+    {
+      "binding": "KV_DEDUPLICATION"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "WEBHOOK_DEDUPLICATOR_DO",
+        "class_name": "InstagramWebhookDeduplicatorDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "InstagramWebhookDeduplicatorDO"
+      ]
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "WEBHOOK_QUEUE",
+        "queue": "instagram-webhooks"
+      }
+    ]
+  },
   "vars": {
     "INSTAGRAM_USER_ID": "17841421598761181",
     "FACEBOOK_PAGE_ID": "1266932313170442",

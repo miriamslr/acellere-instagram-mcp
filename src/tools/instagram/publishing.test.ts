@@ -800,7 +800,8 @@ describe("Instagram publish progress notifications", () => {
       { _meta: { progressToken: "tok-reel" }, sendNotification }
     );
     expect(sendNotification).toHaveBeenCalled();
-    const call = sendNotification.mock.calls[0][0] as { method: string; params: { progressToken: string } };
+    const calls = sendNotification.mock.calls as unknown[][];
+    const call = calls[0][0] as { method: string; params: { progressToken: string } };
     expect(call.method).toBe("notifications/progress");
     expect(call.params.progressToken).toBe("tok-reel");
   });
@@ -832,11 +833,12 @@ describe("Instagram publish progress notifications", () => {
     );
     // 3 child polls + 1 final carousel poll = 4 emissions on the shared token.
     expect(sendNotification).toHaveBeenCalledTimes(4);
-    const progressValues = sendNotification.mock.calls.map(
+    const calls = sendNotification.mock.calls as unknown[][];
+    const progressValues = calls.map(
       (call) => (call[0] as { params: { progress: number; progressToken: string } }).params.progress
     );
     expect(progressValues).toEqual([1, 2, 3, 4]);
-    const firstCall = sendNotification.mock.calls[0][0] as { params: { progressToken: string; total?: number } };
+    const firstCall = calls[0][0] as { params: { progressToken: string; total?: number } };
     expect(firstCall.params.progressToken).toBe("tok-carousel");
     expect(firstCall.params.total).toBeUndefined();
   });
@@ -1039,4 +1041,541 @@ describe("ig_publish_video / _reel / _story error context", () => {
       expect(payload.container_id).toBe("container-X");
     });
   }
+
+  it("ig_get_content_publishing_limit queries rate limit quota", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      ig: vi.fn(async () => ({
+        data: {
+          config: { quota_total: 100, quota_duration: 86400 },
+          quota_usage: 12,
+        },
+        rateLimit: undefined,
+      })),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    registerIgPublishingTools(server as never, client);
+    const handler = server.tools.get("ig_get_content_publishing_limit")!;
+    const result = (await handler({})) as { content: { text: string }[] };
+    const payload = JSON.parse(result.content[0].text) as { quota_usage: number };
+    expect(payload.quota_usage).toBe(12);
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("GET");
+    expect(call[1]).toBe("/1784140001/content_publishing_limit");
+  });
+
+  it("ig_create_resumable_upload_session creates resumable container and returns upload uri", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      requireInstagramCapability: vi.fn(),
+      ig: vi.fn(async () => ({
+        data: {
+          id: "resumable-container-999",
+          uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+        },
+        rateLimit: undefined,
+      })),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    registerIgPublishingTools(server as never, client);
+    const handler = server.tools.get("ig_create_resumable_upload_session")!;
+    const result = (await handler({
+      media_type: "REELS",
+      caption: "Resumable Reel Upload",
+    })) as { content: { text: string }[] };
+
+    expect(client.requireInstagramCapability).toHaveBeenCalledWith("publishing.resumableUpload");
+    const payload = JSON.parse(result.content[0].text) as { id: string; uri: string };
+    expect(payload.id).toBe("resumable-container-999");
+    expect(payload.uri).toContain("rupload.facebook.com");
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("POST");
+    expect(call[1]).toBe("/1784140001/media");
+    expect(call[2]).toEqual({
+      upload_type: "resumable",
+      media_type: "REELS",
+      caption: "Resumable Reel Upload",
+    });
+  });
+
+  it("ig_upload_resumable_binary streams video bytes to uploadResumableBinary with correct params", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      requireInstagramCapability: vi.fn(),
+      uploadResumableBinary: vi.fn(async () => ({
+        success: true,
+        http_status: 200,
+        bytes_uploaded: 5,
+        rupload_response: { success: true },
+      })),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "https://example.com/source.mp4") {
+        return new Response(new Uint8Array([1, 2, 3, 4, 5]), {
+          status: 200,
+          headers: { "content-length": "5" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      registerIgPublishingTools(server as never, client);
+      const handler = server.tools.get("ig_upload_resumable_binary")!;
+      const result = (await handler({
+        upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+        video_url: "https://example.com/source.mp4",
+        offset: 0,
+      })) as { content: { text: string }[] };
+
+      expect(client.requireInstagramCapability).toHaveBeenCalledWith("publishing.resumableUpload");
+      expect(client.uploadResumableBinary).toHaveBeenCalledWith(
+        expect.objectContaining({
+          uploadUri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          offset: 0,
+          fileSize: 5,
+        })
+      );
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.bytes_uploaded).toBe(5);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("ig_upload_resumable_binary rejects base64 video larger than 8MB to protect memory", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      requireInstagramCapability: vi.fn(),
+      uploadResumableBinary: vi.fn(),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    registerIgPublishingTools(server as never, client);
+    const handler = server.tools.get("ig_upload_resumable_binary")!;
+
+    // Create large string > 8MB
+    const largeBase64 = "AAAA".repeat(3_000_000);
+
+    const result = (await handler({
+      upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+      video_base64: largeBase64,
+    })) as { content: { text: string }[]; isError: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("exceeds maximum safe memory limit (8 MB");
+    expect(client.uploadResumableBinary).not.toHaveBeenCalled();
+  });
+
+  it("resumable upload tools fail when capability guard rejects instagram-login mode", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      requireInstagramCapability: vi.fn(() => {
+        throw new Error('Capability "publishing.resumableUpload" is not supported in "instagram-login" mode.');
+      }),
+      ig: vi.fn(),
+      uploadResumableBinary: vi.fn(),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    registerIgPublishingTools(server as never, client);
+
+    const createHandler = server.tools.get("ig_create_resumable_upload_session")!;
+    const createRes = (await createHandler({
+      media_type: "REELS",
+      caption: "Test",
+    })) as { content: { text: string }[]; isError: boolean };
+    expect(createRes.isError).toBe(true);
+    expect(createRes.content[0].text).toContain("publishing.resumableUpload");
+    expect(createRes.content[0].text).toContain("instagram-login");
+    expect(client.ig).not.toHaveBeenCalled();
+
+    const uploadHandler = server.tools.get("ig_upload_resumable_binary")!;
+    const uploadRes = (await uploadHandler({
+      upload_uri: "https://rupload.facebook.com/test",
+      video_url: "https://example.com/test.mp4",
+    })) as { content: { text: string }[]; isError: boolean };
+    expect(uploadRes.isError).toBe(true);
+    expect(uploadRes.content[0].text).toContain("publishing.resumableUpload");
+    expect(uploadRes.content[0].text).toContain("instagram-login");
+    expect(client.uploadResumableBinary).not.toHaveBeenCalled();
+  });
+
+  it("ig_publish_resumable_video completes end-to-end publishing flow via client.uploadResumableBinary", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      requireInstagramCapability: vi.fn(),
+      uploadResumableBinary: vi.fn(async () => ({
+        success: true,
+        http_status: 200,
+        bytes_uploaded: 24,
+        rupload_response: { success: true },
+      })),
+      ig: vi.fn(async (_method: string, path: string) => {
+        if (path === "/1784140001/media") {
+          return {
+            data: { id: "container-resumable-123", uri: "https://rupload.facebook.com/upload-session" },
+            rateLimit: undefined,
+          };
+        }
+        if (path === "/container-resumable-123") {
+          return {
+            data: { status_code: "FINISHED", id: "container-resumable-123" },
+            rateLimit: undefined,
+          };
+        }
+        if (path === "/1784140001/media_publish") {
+          return {
+            data: { id: "published-reel-999" },
+            rateLimit: undefined,
+          };
+        }
+        return { data: {}, rateLimit: undefined };
+      }),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    registerIgPublishingTools(server as never, client);
+    const handler = server.tools.get("ig_publish_resumable_video")!;
+    const result = (await handler({
+      video_base64: btoa("sample-video-bytes-data"),
+      media_type: "REELS",
+      caption: "Full Resumable Reel Publication",
+    })) as { content: { text: string }[] };
+
+    expect(client.requireInstagramCapability).toHaveBeenCalledWith("publishing.resumableUpload");
+    expect(client.uploadResumableBinary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uploadUri: "https://rupload.facebook.com/upload-session",
+        offset: 0,
+        fileSize: 23,
+      })
+    );
+
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.id).toBe("published-reel-999");
+    expect(payload.container_id).toBe("container-resumable-123");
+    expect(payload.status).toBe("published");
+  });
+
+  describe("Resumable Upload Offset & Range Contract Tests", () => {
+    it("handles offset 0 with HTTP 200 and Content-Length", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(async () => ({
+          success: true,
+          http_status: 200,
+          bytes_uploaded: 50,
+          rupload_response: {},
+        })),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(50), {
+        status: 200,
+        headers: { "content-length": "50" },
+      })));
+
+      try {
+        registerIgPublishingTools(server as never, client);
+        const handler = server.tools.get("ig_upload_resumable_binary")!;
+        const res = (await handler({
+          upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          video_url: "https://example.com/video.mp4",
+          offset: 0,
+        })) as { content: { text: string }[] };
+
+        expect(client.uploadResumableBinary).toHaveBeenCalledWith(
+          expect.objectContaining({ offset: 0, fileSize: 50 })
+        );
+        const payload = JSON.parse(res.content[0].text);
+        expect(payload.success).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("handles valid partial offset > 0 with HTTP 206 and strict Content-Range parsing", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(async () => ({
+          success: true,
+          http_status: 200,
+          bytes_uploaded: 200,
+          rupload_response: {},
+        })),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      let capturedRangeHeader: string | undefined;
+      vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+        capturedRangeHeader = (init?.headers as Record<string, string>)?.["Range"];
+        return new Response(new Uint8Array(200), {
+          status: 206,
+          headers: {
+            "content-range": "bytes 100-299/300",
+            "content-length": "200",
+          },
+        });
+      }));
+
+      try {
+        registerIgPublishingTools(server as never, client);
+        const handler = server.tools.get("ig_upload_resumable_binary")!;
+        const res = (await handler({
+          upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          video_url: "https://example.com/video.mp4",
+          offset: 100,
+        })) as { content: { text: string }[] };
+
+        expect(capturedRangeHeader).toBe("bytes=100-");
+        expect(client.uploadResumableBinary).toHaveBeenCalledWith(
+          expect.objectContaining({
+            offset: 100,
+            fileSize: 300, // Total original file size!
+          })
+        );
+        const payload = JSON.parse(res.content[0].text);
+        expect(payload.success).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("rejects when origin server ignores Range header and returns HTTP 200 on offset > 0", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(300), {
+        status: 200, // Ignored Range!
+        headers: { "content-length": "300" },
+      })));
+
+      try {
+        registerIgPublishingTools(server as never, client);
+        const handler = server.tools.get("ig_upload_resumable_binary")!;
+        const res = (await handler({
+          upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          video_url: "https://example.com/video.mp4",
+          offset: 100,
+        })) as { content: { text: string }[]; isError: boolean };
+
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toContain("ignored Range header and returned HTTP 200");
+        expect(client.uploadResumableBinary).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("rejects when HTTP 206 response is missing Content-Range header", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(200), {
+        status: 206,
+        headers: { "content-length": "200" }, // missing content-range
+      })));
+
+      try {
+        registerIgPublishingTools(server as never, client);
+        const handler = server.tools.get("ig_upload_resumable_binary")!;
+        const res = (await handler({
+          upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          video_url: "https://example.com/video.mp4",
+          offset: 100,
+        })) as { content: { text: string }[]; isError: boolean };
+
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toContain("without a Content-Range header");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("rejects when Content-Range START does not match requested offset", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(200), {
+        status: 206,
+        headers: { "content-range": "bytes 50-249/300" }, // START 50 != requested 100
+      })));
+
+      try {
+        registerIgPublishingTools(server as never, client);
+        const handler = server.tools.get("ig_upload_resumable_binary")!;
+        const res = (await handler({
+          upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          video_url: "https://example.com/video.mp4",
+          offset: 100,
+        })) as { content: { text: string }[]; isError: boolean };
+
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toContain("does not match requested offset");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("rejects malformed Content-Range format", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(200), {
+        status: 206,
+        headers: { "content-range": "invalid-range-string" },
+      })));
+
+      try {
+        registerIgPublishingTools(server as never, client);
+        const handler = server.tools.get("ig_upload_resumable_binary")!;
+        const res = (await handler({
+          upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          video_url: "https://example.com/video.mp4",
+          offset: 100,
+        })) as { content: { text: string }[]; isError: boolean };
+
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toContain("Invalid Content-Range header format");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("slices base64 buffer starting at offset and sends total fileSize", async () => {
+      const server = makeMockServer();
+      let capturedBody: Uint8Array | undefined;
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(async (opts) => {
+          capturedBody = opts.body as Uint8Array;
+          return {
+            success: true,
+            http_status: 200,
+            bytes_uploaded: (opts.body as Uint8Array).byteLength,
+            rupload_response: {},
+          };
+        }),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      // 30 bytes of data
+      const rawData = "012345678901234567890123456789";
+      const base64Data = btoa(rawData);
+
+      registerIgPublishingTools(server as never, client);
+      const handler = server.tools.get("ig_upload_resumable_binary")!;
+      const res = (await handler({
+        upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+        video_base64: base64Data,
+        offset: 10,
+      })) as { content: { text: string }[] };
+
+      expect(client.uploadResumableBinary).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: 10,
+          fileSize: 30, // Total original file size!
+        })
+      );
+      expect(capturedBody).toBeDefined();
+      expect(capturedBody?.byteLength).toBe(20); // Sliced 20 bytes chunk
+      const payload = JSON.parse(res.content[0].text);
+      expect(payload.success).toBe(true);
+    });
+
+    it("rejects base64 upload when offset > total fileSize", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      registerIgPublishingTools(server as never, client);
+      const handler = server.tools.get("ig_upload_resumable_binary")!;
+      const res = (await handler({
+        upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+        video_base64: btoa("short-data"),
+        offset: 100, // 100 > 10
+      })) as { content: { text: string }[]; isError: boolean };
+
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text).toContain("exceeds total video file size");
+      expect(client.uploadResumableBinary).not.toHaveBeenCalled();
+    });
+
+    it("preflights base64 memory limit and never calls atob() for oversized payloads", async () => {
+      const server = makeMockServer();
+      const client = {
+        igUserId: "1784140001",
+        requireInstagramCapability: vi.fn(),
+        uploadResumableBinary: vi.fn(),
+        ...makeMockCache(),
+      } as unknown as MetaClient;
+
+      const atobSpy = vi.spyOn(globalThis, "atob");
+      try {
+        registerIgPublishingTools(server as never, client);
+        const handler = server.tools.get("ig_upload_resumable_binary")!;
+
+        // > 8MB base64 string
+        const largeBase64 = "AAAA".repeat(3_000_000);
+
+        const res = (await handler({
+          upload_uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+          video_base64: largeBase64,
+        })) as { content: { text: string }[]; isError: boolean };
+
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toContain("exceeds maximum safe memory limit (8 MB");
+        // Crucial security check: atob was NEVER called!
+        expect(atobSpy).not.toHaveBeenCalled();
+      } finally {
+        atobSpy.mockRestore();
+      }
+    });
+  });
 });
+
