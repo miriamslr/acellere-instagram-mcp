@@ -9,6 +9,7 @@ import { registerIgPublishingTools } from "./tools/instagram/publishing.js";
 import { registerIgMediaTools } from "./tools/instagram/media.js";
 import { registerIgCommentTools } from "./tools/instagram/comments.js";
 import { registerIgProfileTools } from "./tools/instagram/profile.js";
+import { registerIgBusinessMediaTools } from "./tools/instagram/business-media.js";
 import { registerIgHashtagTools } from "./tools/instagram/hashtags.js";
 import { registerIgMentionTools } from "./tools/instagram/mentions.js";
 import { registerIgMessagingTools } from "./tools/instagram/messaging.js";
@@ -32,6 +33,7 @@ export function registerAll(server: McpServer, client: MetaClient): void {
   registerIgMediaTools(server, client);
   registerIgCommentTools(server, client);
   registerIgProfileTools(server, client);
+  registerIgBusinessMediaTools(server, client);
   registerIgHashtagTools(server, client);
   registerIgMentionTools(server, client);
   registerIgMessagingTools(server, client);
