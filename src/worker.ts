@@ -31,7 +31,7 @@ import { registerIgActiveConnectionTools } from "./tools/instagram/active-connec
 
 export { InstagramWebhookDeduplicatorDO, ActiveInstagramConnectionDO };
 
-export const SERVER_VERSION = "8.1.0";
+export const SERVER_VERSION = "8.0.0";
 
 export const SERVER_INSTRUCTIONS = [
   "Acellere Instagram MCP, based on meta-mcp, for managing Instagram and related Meta Graph API capabilities.",
