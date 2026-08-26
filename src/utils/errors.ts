@@ -143,7 +143,14 @@ const REMEDIATION: Partial<Record<ErrorType, string>> = {
   network: "Network error or timeout reaching the Meta API. Retry with exponential backoff; verify outbound connectivity.",
 };
 
-const SENSITIVE_PARAMS = ["access_token", "client_secret", "input_token"];
+const SENSITIVE_PARAMS = [
+  "access_token",
+  "client_secret",
+  "input_token",
+  "appsecret_proof",
+  "AUTH_TOKEN",
+  "INSTAGRAM_ACCESS_TOKEN",
+];
 
 export function sanitizeRaw(text: string): string {
   let result = text;

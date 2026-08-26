@@ -191,9 +191,28 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 |------|-------------|
 | `ig_get_profile` | Get account profile info |
 | `ig_get_account_insights` | Get account-level analytics (views, reach, follower_count). Optional `metric_type` (`total_value` or `time_series`) controls aggregation shape |
-| `ig_business_discovery` | Look up another business account |
+| `ig_business_discovery` | Look up another business/creator account with 10 default public profile fields and strict validation |
 | `ig_get_collaboration_invites` | Get pending collaboration invites |
 | `ig_respond_collaboration_invite` | Accept/decline a collaboration invite by media_id |
+
+### Instagram — Business Discovery & Competitor Intelligence (9)
+
+> [!NOTE]
+> **Princípio Arquitetural Acellere**: Todas as análises calculadas no MCP são **100% determinísticas** (estatísticas, distribuições, benchmarks numéricos). O MCP não executa chamadas de LLM ou inferências semânticas. O dataset gerado é projetado para alimentar diretamente o **ChatGPT / Acellere Marketing Intelligence**, que realiza a jusante as análises qualitativas (posicionamento, Jobs to Be Done, tom de voz, ganchos e CTAs).
+>
+> A métrica de engajamento baseada em dados públicos é sempre rotulada como **`public_engagement_rate`** (engajamento público aparente: `(likes + comments) / followers * 100`), não devendo ser confundida com a taxa de engajamento privada por alcance/impressões.
+
+| Tool | Description |
+|------|-------------|
+| `ig_business_discovery` | Consulta perfil público de terceiros com 10 campos padrão (`id`, `ig_id`, `username`, `name`, `biography`, `website`, `profile_picture_url`, `followers_count`, `follows_count`, `media_count`) e bloqueio de campos não suportados |
+| `ig_get_business_media` | Coleta posts e métricas públicas de contas de terceiros com paginação por cursor, expansão de carrosséis (`children`), `view_count` e filtros de data (`since`, `until`) |
+| `ig_analyze_business` | Análise estatística determinística de concorrente: média/mediana de likes, comentários e views, `public_engagement_rate`, distribuição por formato (% Reels, % Carrosséis, % Imagens), desempenho por dia da semana e faixas de horário, e rankings top/bottom posts |
+| `ig_compare_businesses` | Benchmark comparativo multi-contas lado a lado (1 a 10 contas) com concorrência controlada, isolamento de falhas parciais (`status: "ok" \| "not_found" \| "unsupported" \| "error"`) e identificação de líderes de métricas |
+| `ig_track_business` | Registra conta de concorrente para monitoramento contínuo, salvando baseline de perfil e snapshots de mídias recentes no banco de dados. Idempotente |
+| `ig_untrack_business` | Desativa a coleta recorrente de uma conta monitorada, preservando integralmente todo o histórico e snapshots já capturados. Idempotente |
+| `ig_get_business_history` | Consulta a evolução histórica de métricas de uma conta monitorada por período (`7d`, `30d`, `90d`, `custom`), calculando crescimento absoluto/percentual de seguidores, ritmo de postagens e evolução de likes/views |
+| `ig_run_competitor_collection` | Executa a rotina de coleta e atualização de snapshots para todas as contas ativas no banco, registrando auditoria da execução em `collection_runs` |
+| `ig_competitor_research` | Orquestrador de pesquisa de mercado que combina descoberta de perfil, coleta de mídias e carrosséis, métricas determinísticas, benchmark de líderes e histórico opcional em um dataset estruturado pronto para LLMs |
 
 ### Instagram — Hashtags (4)
 
