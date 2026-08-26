@@ -227,11 +227,12 @@ export function toMcpResourceError(error: unknown, label: string): McpError {
   return new McpError(ErrorCode.InternalError, message, data);
 }
 
-export function validationError(message: string): McpErrorResult {
-  const payload: ErrorPayload = {
+export function validationError(message: string, extra?: Record<string, unknown>): McpErrorResult {
+  const payload: Record<string, unknown> = {
     error: true,
     error_type: "validation",
     message,
+    ...(extra ?? {}),
   };
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],

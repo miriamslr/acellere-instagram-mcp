@@ -2,10 +2,14 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MetaClient, PROFILE_CACHE_TTL_MS } from "../../services/meta-client.js";
 import { metaId } from "../../schemas.js";
-import { IG_PROFILE_FIELDS } from "../../constants/fields.js";
-import { formatErrorResponse } from "../../utils/errors.js";
+import {
+  IG_PROFILE_FIELDS,
+  IG_BUSINESS_DISCOVERY_DEFAULT_FIELDS,
+} from "../../constants/fields.js";
+import { formatErrorResponse, validationError } from "../../utils/errors.js";
 import { formatResponse } from "../../utils/response.js";
 import { buildParams } from "../../utils/params.js";
+import { validateBusinessDiscoveryFields } from "../../utils/business-discovery-validator.js";
 import { READ_ONLY_TOOL, WRITE_IDEMPOTENT_TOOL } from "../annotations.js";
 
 export const IG_PROFILE_CACHE_PREFIX = "ig:profile:";
@@ -25,8 +29,6 @@ export const igBusinessDiscoveryUsernameSchema = z
   .describe(
     "Instagram username to look up (1-30 chars, letters/numbers/periods/underscores only; without @, leading '@' characters and surrounding whitespace are auto-stripped)"
   );
-
-const BUSINESS_DISCOVERY_DEFAULT_FIELDS = "id,username,name,biography,followers_count,follows_count,media_count";
 
 export function registerIgProfileTools(server: McpServer, client: MetaClient): void {
   // ─── ig_get_profile ──────────────────────────────────────────
@@ -92,15 +94,24 @@ export function registerIgProfileTools(server: McpServer, client: MetaClient): v
   server.registerTool(
     "ig_business_discovery",
     {
-      description: "Look up another Instagram Business/Creator account's public info by username.",
+      description: "Look up another Instagram Business/Creator account's public info by username via Business Discovery.",
       inputSchema: {
         username: igBusinessDiscoveryUsernameSchema,
-        fields: z.string().optional().default(BUSINESS_DISCOVERY_DEFAULT_FIELDS).describe(`Fields to retrieve (default: ${BUSINESS_DISCOVERY_DEFAULT_FIELDS})`),
+        fields: z.string().optional().default(IG_BUSINESS_DISCOVERY_DEFAULT_FIELDS).describe(`Fields to retrieve (default: ${IG_BUSINESS_DISCOVERY_DEFAULT_FIELDS})`),
       },
       annotations: READ_ONLY_TOOL,
     },
     async ({ username, fields }) => {
       try {
+        const validation = validateBusinessDiscoveryFields(fields);
+        if (!validation.valid) {
+          return validationError(validation.message || "Invalid fields for Business Discovery", {
+            success: false,
+            error_code: "unsupported_fields",
+            unsupported_fields: validation.unsupportedFields,
+            invalid_fields: validation.invalidFields,
+          });
+        }
         const { data, rateLimit } = await client.ig("GET", `/${client.igUserId}`, {
           fields: `business_discovery.username(${username}){${fields}}`,
         });
