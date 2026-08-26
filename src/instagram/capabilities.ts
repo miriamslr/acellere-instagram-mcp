@@ -34,7 +34,7 @@ export type ReadWriteClassification =
   | "WRITE_IDEMPOTENT"
   | "DESTRUCTIVE";
 
-export type CapabilitySurface = "meta_official" | "acellere_extension";
+export type CapabilitySurface = "meta_official" | "mcp_internal" | "acellere_extension";
 
 export interface InstagramCapability {
   id: string;
@@ -159,7 +159,7 @@ export const INSTAGRAM_CAPABILITIES: Record<string, InstagramCapability> = {
   },
   "auth.capabilities": {
     id: "auth.capabilities",
-    surface: "meta_official",
+    surface: "mcp_internal",
     category: "auth",
     name: "Get Capabilities Matrix",
     description: "Query capabilities supported for the active authentication mode",
@@ -178,7 +178,7 @@ export const INSTAGRAM_CAPABILITIES: Record<string, InstagramCapability> = {
   },
   "auth.connectionInfo": {
     id: "auth.connectionInfo",
-    surface: "meta_official",
+    surface: "mcp_internal",
     category: "auth",
     name: "Get Connection Metadata",
     description: "Check sanitized connection metadata without exposing secrets",
@@ -1693,6 +1693,11 @@ export function getCapabilitiesSummary(mode: InstagramApiMode): {
     available: Array<Omit<InstagramCapability, "permissionsByMode"> & { permissions: string[] }>;
     unavailable: Array<Omit<InstagramCapability, "permissionsByMode"> & { permissions: string[] }>;
   };
+  mcp_internal: {
+    total: number;
+    available_count: number;
+    items: Array<Omit<InstagramCapability, "permissionsByMode"> & { permissions: string[] }>;
+  };
   acellere_extensions: {
     total: number;
     available_count: number;
@@ -1702,6 +1707,7 @@ export function getCapabilitiesSummary(mode: InstagramApiMode): {
   const all = Object.values(INSTAGRAM_CAPABILITIES);
 
   const official = all.filter((c) => c.surface === "meta_official");
+  const internal = all.filter((c) => c.surface === "mcp_internal");
   const extensions = all.filter((c) => c.surface === "acellere_extension");
 
   const formatWithEffectivePermissions = (cap: InstagramCapability) => ({
@@ -1730,6 +1736,10 @@ export function getCapabilitiesSummary(mode: InstagramApiMode): {
     .filter((c) => !(mode === "facebook-login" ? c.facebookLogin : c.instagramLogin))
     .map(formatWithEffectivePermissions);
 
+  const internalAvailable = internal
+    .filter((c) => (mode === "facebook-login" ? c.facebookLogin : c.instagramLogin))
+    .map(formatWithEffectivePermissions);
+
   const extAvailable = extensions
     .filter((c) => (mode === "facebook-login" ? c.facebookLogin : c.instagramLogin))
     .map(formatWithEffectivePermissions);
@@ -1744,6 +1754,11 @@ export function getCapabilitiesSummary(mode: InstagramApiMode): {
       available: officialAvailable,
       unavailable: officialUnavailable,
     },
+    mcp_internal: {
+      total: MCP_INTERNAL_COUNT,
+      available_count: internalAvailable.length,
+      items: internalAvailable,
+    },
     acellere_extensions: {
       total: ACELLERE_EXTENSIONS_COUNT,
       available_count: extAvailable.length,
@@ -1756,6 +1771,11 @@ export const OFFICIAL_CAPABILITIES = Object.values(INSTAGRAM_CAPABILITIES).filte
   (c) => c.surface === "meta_official"
 );
 export const OFFICIAL_CAPABILITIES_COUNT = OFFICIAL_CAPABILITIES.length;
+
+export const MCP_INTERNAL_CAPABILITIES = Object.values(INSTAGRAM_CAPABILITIES).filter(
+  (c) => c.surface === "mcp_internal"
+);
+export const MCP_INTERNAL_COUNT = MCP_INTERNAL_CAPABILITIES.length;
 
 export const ACELLERE_EXTENSIONS = Object.values(INSTAGRAM_CAPABILITIES).filter(
   (c) => c.surface === "acellere_extension"

@@ -89,7 +89,7 @@ describe("Instagram API mode routing", () => {
     await client.ig("GET", "/123456");
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
-      /^https:\/\/graph\.instagram\.com\/v25\.0\/123456\?/
+      /^https:\/\/graph\.instagram\.com\/v26\.0\/123456\?/
     );
   });
 
@@ -104,7 +104,7 @@ describe("Instagram API mode routing", () => {
     await client.ig("GET", "/123456");
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
-      /^https:\/\/graph\.facebook\.com\/v25\.0\/123456\?/
+      /^https:\/\/graph\.facebook\.com\/v26\.0\/123456\?/
     );
   });
 
@@ -125,7 +125,7 @@ describe("Instagram API mode routing", () => {
     await client.igExchangeToken("short-token");
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
-      /^https:\/\/graph\.facebook\.com\/v25\.0\/oauth\/access_token\?/
+      /^https:\/\/graph\.facebook\.com\/v26\.0\/oauth\/access_token\?/
     );
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("grant_type=fb_exchange_token");
 
@@ -197,5 +197,55 @@ describe("Instagram conversations target ID routing", () => {
     );
 
     expect(client.igConversationsTargetId).toBe("17841421598761181");
+  });
+});
+
+describe("AcellereMetaClient.uploadResumableBinary safety gate", () => {
+  it("blocks resumable upload binary when writeMode is read-only before making any fetch call", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const client = new AcellereMetaClient(
+      makeConfig({
+        instagramAccessToken: "token123",
+      }),
+      {
+        writeMode: "read-only",
+      }
+    );
+
+    await expect(
+      client.uploadResumableBinary({
+        uploadUri: "https://rupload.facebook.com/ig-api-upload/v26.0/123",
+        body: new Uint8Array([1, 2, 3]),
+        fileSize: 3,
+      })
+    ).rejects.toThrow(/Acellere safety gate blocked POST: server is running in read-only mode/);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows resumable upload binary when writeMode is write", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
+
+    const client = new AcellereMetaClient(
+      makeConfig({
+        instagramAccessToken: "token123",
+      }),
+      {
+        writeMode: "write",
+      }
+    );
+
+    const result = await client.uploadResumableBinary({
+      uploadUri: "https://rupload.facebook.com/ig-api-upload/v26.0/123",
+      body: new Uint8Array([1, 2, 3]),
+      fileSize: 3,
+    });
+
+    expect(result.success).toBe(true);
   });
 });

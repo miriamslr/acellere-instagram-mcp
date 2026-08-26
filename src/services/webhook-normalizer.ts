@@ -189,8 +189,12 @@ export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent
 
         if (msg.message_edit) {
           const editDetails = msg.message_edit as Record<string, unknown>;
+          const numEdit = typeof editDetails.num_edit === "number" ? editDetails.num_edit : 1;
+          const id = editDetails.mid
+            ? `${editDetails.mid}:edit:${numEdit}`
+            : `${entryId}_${timestamp}_edit_${numEdit}`;
           normalized.push({
-            id: String(editDetails.mid ?? `${entryId}_${timestamp}_edit`),
+            id,
             eventType: "message_edited",
             timestamp,
             recipientId,
@@ -198,7 +202,7 @@ export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent
             payload: {
               mid: editDetails.mid,
               text: editDetails.text,
-              num_edit: editDetails.num_edit,
+              num_edit: numEdit,
             },
             raw: msgItem,
           });
@@ -212,7 +216,9 @@ export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent
 
           if (numEdit !== undefined && numEdit > 0) {
             normalized.push({
-              id: String(msgDetails.mid ?? `${entryId}_${timestamp}_edit`),
+              id: msgDetails.mid
+                ? `${msgDetails.mid}:edit:${numEdit}`
+                : `${entryId}_${timestamp}_edit_${numEdit}`,
               eventType: "message_edited",
               timestamp,
               recipientId,

@@ -392,6 +392,8 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
     },
     async ({ media_type, caption, cover_url, thumb_offset, location_id, share_to_feed, collaborators, audio_name }) => {
       try {
+        client.requireInstagramCapability("publishing.resumableUpload");
+
         const params = buildParams(
           {
             upload_type: "resumable",
@@ -436,53 +438,69 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
     },
     async ({ upload_uri, video_url, video_base64, offset }) => {
       try {
+        client.requireInstagramCapability("publishing.resumableUpload");
+
         if (!video_url && !video_base64) {
           return formatErrorResponse(new Error("Either video_url or video_base64 must be provided"), "Upload resumable binary");
         }
 
-        let buffer: Uint8Array;
+        let body: BodyInit;
+        let fileSize: number;
+
         if (video_url) {
-          const res = await fetch(video_url);
-          if (!res.ok) throw new Error(`Failed to fetch source video from ${video_url}: HTTP ${res.status}`);
-          buffer = new Uint8Array(await res.arrayBuffer());
+          const fetchHeaders: Record<string, string> = {};
+          if (offset > 0) {
+            fetchHeaders["Range"] = `bytes=${offset}-`;
+          }
+          const sourceRes = await fetch(video_url, { headers: fetchHeaders });
+          if (!sourceRes.ok && sourceRes.status !== 206) {
+            throw new Error(`Failed to fetch source video from ${video_url}: HTTP ${sourceRes.status}`);
+          }
+
+          if (offset > 0 && sourceRes.headers.get("content-range")) {
+            const range = sourceRes.headers.get("content-range")!;
+            const match = range.match(/\/(\d+)$/);
+            if (match) {
+              fileSize = Number(match[1]);
+            } else {
+              fileSize = offset + Number(sourceRes.headers.get("content-length") ?? 0);
+            }
+          } else {
+            const cl = sourceRes.headers.get("content-length");
+            if (!cl) {
+              throw new Error(`Source video at ${video_url} did not provide a Content-Length header.`);
+            }
+            fileSize = Number(cl);
+          }
+
+          if (!sourceRes.body) {
+            throw new Error(`Source video at ${video_url} returned an empty body.`);
+          }
+          body = sourceRes.body as unknown as BodyInit;
         } else {
           const binaryStr = atob(video_base64!);
-          buffer = new Uint8Array(binaryStr.length);
+          if (binaryStr.length > 8 * 1024 * 1024) {
+            throw new Error(
+              `Base64 video payload exceeds maximum safe memory limit (8 MB, got ${(binaryStr.length / (1024 * 1024)).toFixed(2)} MB). ` +
+              `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
+            );
+          }
+          const buffer = new Uint8Array(binaryStr.length);
           for (let i = 0; i < binaryStr.length; i++) {
             buffer[i] = binaryStr.charCodeAt(i);
           }
+          fileSize = buffer.byteLength;
+          body = buffer as unknown as BodyInit;
         }
 
-        const uploadRes = await fetch(upload_uri, {
-          method: "POST",
-          headers: {
-            Authorization: `OAuth ${client.igAccessToken}`,
-            offset: String(offset),
-            file_size: String(buffer.byteLength),
-            "Content-Type": "application/octet-stream",
-            "X-Entity-Length": String(buffer.byteLength),
-          },
-          body: buffer as unknown as BodyInit,
+        const result = await client.uploadResumableBinary({
+          uploadUri: upload_uri,
+          body,
+          offset,
+          fileSize,
         });
 
-        const resText = await uploadRes.text();
-        let parsedData: unknown;
-        try {
-          parsedData = JSON.parse(resText);
-        } catch {
-          parsedData = { status: uploadRes.status, body: resText };
-        }
-
-        if (!uploadRes.ok) {
-          throw new Error(`rupload failed (HTTP ${uploadRes.status}): ${resText}`);
-        }
-
-        return formatResponse({
-          success: true,
-          http_status: uploadRes.status,
-          bytes_uploaded: buffer.byteLength,
-          rupload_response: parsedData,
-        });
+        return formatResponse(result);
       } catch (error) {
         return formatErrorResponse(error, "Upload resumable binary");
       }
@@ -514,6 +532,8 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
       let containerId: string | undefined;
 
       try {
+        client.requireInstagramCapability("publishing.resumableUpload");
+
         if (!video_url && !video_base64) {
           return formatErrorResponse(new Error("Either video_url or video_base64 must be provided"), "Publish resumable video");
         }
@@ -540,37 +560,45 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
         containerId = sessionData.id;
         const uploadUri = sessionData.uri;
 
-        // Step 2: Upload binary to rupload.facebook.com
+        // Step 2: Upload binary to rupload.facebook.com via client gateway
         step = "binary transfer";
-        let buffer: Uint8Array;
+        let body: BodyInit;
+        let fileSize: number;
+
         if (video_url) {
-          const res = await fetch(video_url);
-          if (!res.ok) throw new Error(`Failed to download source video: HTTP ${res.status}`);
-          buffer = new Uint8Array(await res.arrayBuffer());
+          const sourceRes = await fetch(video_url);
+          if (!sourceRes.ok) throw new Error(`Failed to download source video: HTTP ${sourceRes.status}`);
+          const cl = sourceRes.headers.get("content-length");
+          if (!cl) {
+            throw new Error(`Source video at ${video_url} did not provide a Content-Length header.`);
+          }
+          fileSize = Number(cl);
+          if (!sourceRes.body) {
+            throw new Error(`Source video at ${video_url} returned an empty body.`);
+          }
+          body = sourceRes.body as unknown as BodyInit;
         } else {
           const binaryStr = atob(video_base64!);
-          buffer = new Uint8Array(binaryStr.length);
+          if (binaryStr.length > 8 * 1024 * 1024) {
+            throw new Error(
+              `Base64 video payload exceeds maximum safe memory limit (8 MB, got ${(binaryStr.length / (1024 * 1024)).toFixed(2)} MB). ` +
+              `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
+            );
+          }
+          const buffer = new Uint8Array(binaryStr.length);
           for (let i = 0; i < binaryStr.length; i++) {
             buffer[i] = binaryStr.charCodeAt(i);
           }
+          fileSize = buffer.byteLength;
+          body = buffer as unknown as BodyInit;
         }
 
-        const uploadRes = await fetch(uploadUri, {
-          method: "POST",
-          headers: {
-            Authorization: `OAuth ${client.igAccessToken}`,
-            offset: "0",
-            file_size: String(buffer.byteLength),
-            "Content-Type": "application/octet-stream",
-            "X-Entity-Length": String(buffer.byteLength),
-          },
-          body: buffer as unknown as BodyInit,
+        await client.uploadResumableBinary({
+          uploadUri,
+          body,
+          offset: 0,
+          fileSize,
         });
-
-        if (!uploadRes.ok) {
-          const errText = await uploadRes.text();
-          throw new Error(`rupload transfer failed (HTTP ${uploadRes.status}): ${errText}`);
-        }
 
         // Step 3: Wait for container processing
         step = "processing";

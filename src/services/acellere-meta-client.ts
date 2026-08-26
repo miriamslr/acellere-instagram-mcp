@@ -6,6 +6,8 @@ import {
   type HttpMethod,
   type MetaClientOptions,
   type RequestOptions,
+  type ResumableUploadBinaryOptions,
+  type ResumableUploadBinaryResult,
 } from "./meta-client.js";
 
 export type AcellereWriteMode = "read-only" | "write";
@@ -196,6 +198,13 @@ export class AcellereMetaClient extends MetaClient {
   ) {
     assertAcellereWriteAllowed(method, this.safety);
     return super.meta(method, path, params, options);
+  }
+
+  override async uploadResumableBinary(
+    options: ResumableUploadBinaryOptions
+  ): Promise<ResumableUploadBinaryResult> {
+    assertAcellereWriteAllowed("POST", this.safety);
+    return super.uploadResumableBinary(options);
   }
 
   override get igConversationsTargetId(): string {

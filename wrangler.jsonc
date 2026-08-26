@@ -10,6 +10,13 @@
   "observability": {
     "enabled": true
   },
+  "kv_namespaces": [
+    {
+      "binding": "KV_DEDUPLICATION",
+      "id": "acellere_deduplication_kv",
+      "preview_id": "acellere_deduplication_kv_preview"
+    }
+  ],
   "vars": {
     "INSTAGRAM_USER_ID": "17841421598761181",
     "FACEBOOK_PAGE_ID": "1266932313170442",

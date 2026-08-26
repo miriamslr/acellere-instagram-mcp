@@ -3,6 +3,8 @@ import {
   INSTAGRAM_CAPABILITIES,
   OFFICIAL_CAPABILITIES,
   OFFICIAL_CAPABILITIES_COUNT,
+  MCP_INTERNAL_CAPABILITIES,
+  MCP_INTERNAL_COUNT,
   ACELLERE_EXTENSIONS,
   ACELLERE_EXTENSIONS_COUNT,
   isCapabilitySupported,
@@ -14,15 +16,18 @@ import {
 describe("Instagram Capabilities Matrix", () => {
   it("defines comprehensive capabilities with valid metadata and surface separation", () => {
     const capabilities = Object.values(INSTAGRAM_CAPABILITIES);
-    expect(capabilities.length).toBe(OFFICIAL_CAPABILITIES_COUNT + ACELLERE_EXTENSIONS_COUNT);
-    expect(OFFICIAL_CAPABILITIES_COUNT).toBe(74);
+    expect(capabilities.length).toBe(
+      OFFICIAL_CAPABILITIES_COUNT + MCP_INTERNAL_COUNT + ACELLERE_EXTENSIONS_COUNT
+    );
+    expect(OFFICIAL_CAPABILITIES_COUNT).toBe(72);
+    expect(MCP_INTERNAL_COUNT).toBe(2);
     expect(ACELLERE_EXTENSIONS_COUNT).toBe(6);
     expect(capabilities.length).toBe(80);
 
     for (const cap of capabilities) {
       expect(cap.id).toBeDefined();
       expect(cap.name).toBeDefined();
-      expect(cap.surface).toMatch(/^(meta_official|acellere_extension)$/);
+      expect(cap.surface).toMatch(/^(meta_official|mcp_internal|acellere_extension)$/);
       expect(cap.category).toBeDefined();
       expect(cap.endpoint).toBeDefined();
       expect(cap.method).toMatch(/^(GET|POST|DELETE)$/);
@@ -91,11 +96,15 @@ describe("Instagram Capabilities Matrix", () => {
     expect(fbSummary.acellere_extensions.total).toBe(ACELLERE_EXTENSIONS_COUNT);
     expect(fbSummary.acellere_extensions.available_count).toBe(ACELLERE_EXTENSIONS.filter((c) => c.facebookLogin).length);
 
+    expect(fbSummary.mcp_internal.total).toBe(MCP_INTERNAL_COUNT);
+    expect(fbSummary.mcp_internal.available_count).toBe(MCP_INTERNAL_CAPABILITIES.length);
+
     const igSummary = getCapabilitiesSummary("instagram-login");
     expect(igSummary.login_mode).toBe("instagram-login");
     expect(igSummary.official_surface.total).toBe(OFFICIAL_CAPABILITIES_COUNT);
     const igOfficialExpectedAvailable = OFFICIAL_CAPABILITIES.filter((c) => c.instagramLogin).length;
     expect(igSummary.official_surface.available_count).toBe(igOfficialExpectedAvailable);
     expect(igSummary.official_surface.unavailable_count).toBe(OFFICIAL_CAPABILITIES_COUNT - igOfficialExpectedAvailable);
+    expect(igSummary.mcp_internal.total).toBe(MCP_INTERNAL_COUNT);
   });
 });

@@ -49,7 +49,7 @@ describe("Instagram Webhook Normalizer", () => {
     expect(normalized[0].payload.referral).toEqual({ source: "ADS", ref: "campaign_1" });
   });
 
-  it("normalizes message_edited events", () => {
+  it("normalizes message_edited events with deterministic revision ID", () => {
     const rawPayload = {
       object: "instagram",
       entry: [
@@ -75,9 +75,80 @@ describe("Instagram Webhook Normalizer", () => {
     const normalized = normalizeInstagramWebhook(rawPayload);
     expect(normalized).toHaveLength(1);
     expect(normalized[0].eventType).toBe("message_edited");
-    expect(normalized[0].id).toBe("mid_edited_123");
+    expect(normalized[0].id).toBe("mid_edited_123:edit:1");
     expect(normalized[0].payload.text).toBe("Updated text message");
     expect(normalized[0].payload.num_edit).toBe(1);
+  });
+
+  it("handles multiple sequential edits of the same mid without deduplication collisions", async () => {
+    const now = Date.now();
+    const edit1Payload = {
+      object: "instagram",
+      entry: [
+        {
+          id: "1784140001",
+          time: now,
+          messaging: [
+            {
+              sender: { id: "igsid_123" },
+              recipient: { id: "1784140001" },
+              timestamp: now,
+              message_edit: {
+                mid: "mid_target_999",
+                text: "First edit",
+                num_edit: 1,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const edit2Payload = {
+      object: "instagram",
+      entry: [
+        {
+          id: "1784140001",
+          time: now + 5000,
+          messaging: [
+            {
+              sender: { id: "igsid_123" },
+              recipient: { id: "1784140001" },
+              timestamp: now + 5000,
+              message_edit: {
+                mid: "mid_target_999",
+                text: "Second edit with different text",
+                num_edit: 2,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const normalized1 = normalizeInstagramWebhook(edit1Payload);
+    const normalized2 = normalizeInstagramWebhook(edit2Payload);
+
+    expect(normalized1[0].id).toBe("mid_target_999:edit:1");
+    expect(normalized2[0].id).toBe("mid_target_999:edit:2");
+
+    const dedup = new InMemoryEventDeduplicator();
+    const sink = new DefaultWebhookEventSink(dedup);
+
+    // Edit 1 is dispatched
+    const res1 = await sink.dispatch(normalized1);
+    expect(res1.dispatched).toBe(1);
+    expect(res1.ignoredDuplicates).toBe(0);
+
+    // Edit 2 is also dispatched (different revision ID)
+    const res2 = await sink.dispatch(normalized2);
+    expect(res2.dispatched).toBe(1);
+    expect(res2.ignoredDuplicates).toBe(0);
+
+    // Retrying Edit 2 is dropped as duplicate
+    const res2Retry = await sink.dispatch(normalized2);
+    expect(res2Retry.dispatched).toBe(0);
+    expect(res2Retry.ignoredDuplicates).toBe(1);
   });
 
   it("normalizes comment and live comment events from changes array (Form 1)", () => {

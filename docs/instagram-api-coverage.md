@@ -21,18 +21,14 @@ A arquitetura opera com um **Capability Guard Gateway** centralizado (`src/insta
 ## 2. Superfície Oficial da Instagram Platform (Meta Official Surface)
 
 > [!NOTE]
-> Esta seção compõe a base matemática do denominador para a declaração de **100% de cobertura da API oficial**. Todas as capacidades pertencem exclusivamente a endpoints oficiais da Meta Graph API.
-
-| ID da Capacidade | Categoria | Endpoint Oficial da Meta | Método | Facebook Login | Instagram Login | Ferramenta MCP | Permissões (Facebook Login) | Permissões (Instagram Login) | Status |
-| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- | :--- | :---: |
+> Esta seção compõe a base matemática do denominador para a declaração de **100% de cobertura da API oficial**. Todas as capacidades pertencem exclusivamente a endpoin| ID da Capacidade | Categoria | Endpoint Oficial da Meta | Método | Facebook Login | Instagram Login | Ferramenta MCP | Permissões (Facebook Login) | Permissões (Instagram Login) | Status |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- | :---: |
 | `auth.tokenDebug` | Auth | `GET /debug_token` | GET | ✅ | ✅ | `meta_debug_token` | — | — | `COVERED` |
 | `auth.tokenExchangeFacebook` | Auth | `GET /oauth/access_token?grant_type=fb_exchange_token` | GET | ✅ | ❌ | `meta_exchange_token` | `pages_show_list,instagram_basic` | — | `FACEBOOK_LOGIN_ONLY` |
 | `auth.tokenExchangeInstagram` | Auth | `GET /access_token?grant_type=ig_exchange_token` | GET | ❌ | ✅ | `meta_exchange_token` | — | `instagram_business_basic` | `INSTAGRAM_LOGIN_ONLY` |
 | `auth.tokenRefreshInstagram` | Auth | `GET /refresh_access_token?grant_type=ig_refresh_token` | GET | ❌ | ✅ | `meta_refresh_token` | — | `instagram_business_basic` | `INSTAGRAM_LOGIN_ONLY` |
 | `auth.appInfo` | Auth | `GET /{app-id}` | GET | ✅ | ✅ | `meta_get_app_info` | — | — | `COVERED` |
-| `auth.capabilities` | Auth | In-process Gateway | GET | ✅ | ✅ | `ig_get_capabilities` | — | — | `COVERED` |
-| `auth.connectionInfo` | Auth | In-process Gateway | GET | ✅ | ✅ | `ig_get_connection_info` | — | — | `COVERED` |
-| `auth.bootstrapDiscovery` | Auth | `GET /me/accounts` ou `GET /me` | GET | ✅ | ✅ | `ig_bootstrap_discovery` | `pages_show_list,instagram_basic` | `instagram_business_basic` | `COVERED` |
+| `auth.bootstrapDiscovery` | Auth | `GET /me/accounts` ou `GET /me` | GET | ✅ | ✅ | `ig_bootstrap_discovery` | `pages_show_list,instagram_basic` | `instagram_business_basic` | `COVERED` |discovery` | `pages_show_list,instagram_basic` | `instagram_business_basic` | `COVERED` |
 | `profile.me` | Profile | `GET /{ig-user-id}` | GET | ✅ | ✅ | `ig_get_profile` | `instagram_basic` | `instagram_business_basic` | `COVERED` |
 | `profile.insights` | Insights | `GET /{ig-user-id}/insights` | GET | ✅ | ✅ | `ig_get_account_insights` | `instagram_manage_insights` | `instagram_business_manage_insights` | `COVERED` |
 | `publishing.photo` | Publishing | `POST /{ig-user-id}/media` + `media_publish` | POST | ✅ | ✅ | `ig_publish_photo` | `instagram_content_publish` | `instagram_business_content_publish` | `COVERED` |
@@ -102,7 +98,19 @@ A arquitetura opera com um **Capability Guard Gateway** centralizado (`src/insta
 
 ---
 
-## 3. Acellere Extensions (Ferramentas Analíticas e de Inteligência)
+## 3. Utilitários Internos MCP (MCP Internal Surface — `mcp_internal`)
+
+> [!NOTE]
+> Estas ferramentas são utilitários operacionais em tempo de execução (`In-process Gateway`) para introspecção do MCP e inspeção de conexão segura sem expor credenciais. Elas pertencem à superfície `mcp_internal` e **não compõem o denominador** de endpoints oficiais da Meta.
+
+| ID da Capacidade | Categoria | Mecanismo | Método | Facebook Login | Instagram Login | Ferramenta MCP | Status |
+| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :---: |
+| `auth.capabilities` | Auth | In-process Gateway | GET | ✅ | ✅ | `ig_get_capabilities` | `COVERED` |
+| `auth.connectionInfo` | Auth | In-process Gateway | GET | ✅ | ✅ | `ig_get_connection_info` | `COVERED` |
+
+---
+
+## 4. Acellere Extensions (Ferramentas Analíticas e de Inteligência)
 
 > [!NOTE]
 > Estas ferramentas são construções proprietárias da arquitetura Acellere, baseadas no endpoint oficial de Business Discovery e persistência D1/SQLite local. Elas **não** fazem parte da API oficial da Meta e **não compõem o denominador** da métrica oficial de 100%.
@@ -118,7 +126,7 @@ A arquitetura opera com um **Capability Guard Gateway** centralizado (`src/insta
 
 ---
 
-## 4. Classificação dos Status
+## 5. Classificação dos Status
 
 1. `COVERED`: Implementação direta de endpoint oficial da Meta Graph API disponível no modo ativo.
 2. `COVERED_BY_ABSTRACTION`: Capacidade atendida por agregação analítica estruturada sobre endpoints da Meta e banco local.

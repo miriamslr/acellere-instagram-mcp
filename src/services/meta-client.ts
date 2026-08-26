@@ -7,7 +7,7 @@ import {
   type InstagramCapability,
 } from "../instagram/capabilities.js";
 
-// Default Meta Graph API and Threads API versions — last verified 2026-05-06.
+// Default Meta Graph API and Threads API versions — last verified 2026-08-26.
 // The Graph API ships a new minor version every ~4 months and supports each
 // for ~2 years; Threads runs a separate single-major-version track (v1.0 since
 // launch) and is intentionally not bumped in lockstep with the Graph API.
@@ -17,7 +17,7 @@ import {
 // (`graph.instagram.com/access_token`, `graph.threads.net/refresh_access_token`,
 // etc.) are unversioned by Meta — `IG_TOKEN_BASE` / `THREADS_TOKEN_BASE` stay
 // unversioned regardless of the version env vars.
-export const DEFAULT_META_API_VERSION = "v25.0";
+export const DEFAULT_META_API_VERSION = "v26.0";
 export const DEFAULT_THREADS_API_VERSION = "v1.0";
 
 const API_VERSION_PATTERN = /^v\d+\.\d+$/;
@@ -203,6 +203,60 @@ export interface RequestOptions {
    * convention is enforced (see #81). Audited in #104.
    */
   jsonBody?: Record<string, unknown>;
+}
+
+export interface ResumableUploadBinaryOptions {
+  uploadUri: string;
+  body: BodyInit;
+  offset?: number;
+  fileSize: number;
+}
+
+export interface ResumableUploadBinaryResult extends Record<string, unknown> {
+  success: boolean;
+  http_status: number;
+  bytes_uploaded: number;
+  rupload_response: unknown;
+}
+
+/**
+ * Strict validator for Meta resumable upload endpoints.
+ * Enforces https://, strictly rupload.facebook.com, no userinfo, default port,
+ * protecting against token exfiltration attacks.
+ */
+export function validateRuploadUri(uploadUri: string): URL {
+  let url: URL;
+  try {
+    url = new URL(uploadUri);
+  } catch {
+    throw new Error(`Invalid upload URI: "${uploadUri}" is not a valid URL.`);
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error(
+      `Security validation failed: rupload URI protocol must be "https:" (got "${url.protocol}").`
+    );
+  }
+
+  if (url.hostname.toLowerCase() !== "rupload.facebook.com") {
+    throw new Error(
+      `Security validation failed: rupload URI host must be strictly "rupload.facebook.com" (got "${url.hostname}").`
+    );
+  }
+
+  if (url.username || url.password) {
+    throw new Error(
+      "Security validation failed: rupload URI must not contain userinfo (username/password)."
+    );
+  }
+
+  if (url.port && url.port !== "443") {
+    throw new Error(
+      `Security validation failed: rupload URI port must be default HTTPS port 443 (got "${url.port}").`
+    );
+  }
+
+  return url;
 }
 
 interface ParsedMetaError {
@@ -651,6 +705,55 @@ export class MetaClient {
     return this.request(this.fbBase, appToken, "GET", "/debug_token", {
       input_token: inputToken,
     });
+  }
+
+  /**
+   * Upload binary data to Meta rupload.facebook.com for resumable upload sessions.
+   * Performs strict URL validation and does not leak tokens on redirects.
+   */
+  async uploadResumableBinary(
+    options: ResumableUploadBinaryOptions
+  ): Promise<ResumableUploadBinaryResult> {
+    const validatedUrl = validateRuploadUri(options.uploadUri);
+    if (!this.config.instagramAccessToken) {
+      throw new Error("INSTAGRAM_ACCESS_TOKEN is not configured.");
+    }
+    const offset = options.offset ?? 0;
+    const fileSize = options.fileSize;
+
+    const res = await fetch(validatedUrl.toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `OAuth ${this.config.instagramAccessToken}`,
+        offset: String(offset),
+        file_size: String(fileSize),
+        "Content-Type": "application/octet-stream",
+        "X-Entity-Length": String(fileSize),
+      },
+      body: options.body,
+      redirect: "error", // Forbid following redirects to prevent credential leakage
+      // @ts-expect-error Node/undici duplex option for streaming bodies
+      duplex: "half",
+    });
+
+    const resText = await res.text();
+    let parsedData: unknown;
+    try {
+      parsedData = JSON.parse(resText);
+    } catch {
+      parsedData = { status: res.status, body: resText };
+    }
+
+    if (!res.ok) {
+      throw new Error(`rupload transfer failed (HTTP ${res.status}): ${resText}`);
+    }
+
+    return {
+      success: true,
+      http_status: res.status,
+      bytes_uploaded: Math.max(0, fileSize - offset),
+      rupload_response: parsedData,
+    };
   }
 
   get igAccessToken(): string {
