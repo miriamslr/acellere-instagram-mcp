@@ -8,7 +8,7 @@ import { MetaClient } from "../../services/meta-client.js";
 import { makeMockCache } from "../test-utils.js";
 
 function makeMockServer() {
-  const tools = new Map<string, (...args: unknown[]) => unknown>();
+  const tools = new Map<string, (args?: Record<string, unknown>) => Promise<unknown>>();
   const schemas = new Map<string, z.ZodRawShape>();
   return {
     tools,
