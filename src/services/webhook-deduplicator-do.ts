@@ -1,10 +1,16 @@
 /**
- * Cloudflare Durable Object State Storage Interface for transactional operations
+ * Minimal Cloudflare Durable Object storage surface used by the deduplicator.
+ * Durable Object storage does not provide per-key expirationTtl like Workers KV,
+ * so TTL is enforced explicitly through expiresAt plus an alarm-driven cleanup.
  */
 export interface DurableObjectStorageLike {
   get<T = unknown>(key: string): Promise<T | undefined>;
-  put<T = unknown>(key: string, value: T, options?: { expirationTtl?: number }): Promise<void>;
+  put<T = unknown>(key: string, value: T): Promise<void>;
   delete(key: string): Promise<boolean>;
+  list?<T = unknown>(options?: { prefix?: string }): Promise<Map<string, T>>;
+  getAlarm?(): Promise<number | null>;
+  setAlarm?(scheduledTimeMs: number): Promise<void>;
+  deleteAlarm?(): Promise<void>;
   deleteAll?(): Promise<void>;
 }
 
@@ -26,9 +32,26 @@ export interface CheckAndSetResult {
   status: "new" | "duplicate" | "pending_in_progress";
 }
 
+const DEFAULT_TTL_SECONDS = 86400;
+const DEFAULT_PENDING_LEASE_MS = 30000;
+const EVENT_KEY_PREFIX = "event:";
+
+function normalizeTtlSeconds(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_TTL_SECONDS;
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_TTL_SECONDS;
+  return Math.max(1, Math.floor(value));
+}
+
+function normalizePendingLeaseMs(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_PENDING_LEASE_MS;
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_PENDING_LEASE_MS;
+  return Math.max(1, Math.floor(value));
+}
+
 /**
- * Cloudflare Durable Object for strong atomic webhook deduplication and ACK coordination.
- * Serializes all check-and-set and delivery state transitions with strong consistency.
+ * Cloudflare Durable Object for strong webhook deduplication and ACK coordination.
+ * All events currently route through one named DO instance, which serializes state
+ * transitions. TTL is logical (expiresAt) and stale records are reclaimed by alarms.
  */
 export class InstagramWebhookDeduplicatorDO {
   private readonly state: DurableObjectStateLike;
@@ -37,84 +60,137 @@ export class InstagramWebhookDeduplicatorDO {
     this.state = state;
   }
 
+  private eventKey(eventId: string): string {
+    return `${EVENT_KEY_PREFIX}${eventId}`;
+  }
+
+  private async scheduleCleanup(expiresAt: number): Promise<void> {
+    const storage = this.state.storage;
+    if (!storage.setAlarm) return;
+
+    if (!storage.getAlarm) {
+      await storage.setAlarm(expiresAt);
+      return;
+    }
+
+    const currentAlarm = await storage.getAlarm();
+    if (currentAlarm === null || expiresAt < currentAlarm) {
+      await storage.setAlarm(expiresAt);
+    }
+  }
+
+  private async getLiveRecord(key: string, now: number): Promise<EventStateRecord | undefined> {
+    const existing = await this.state.storage.get<EventStateRecord>(key);
+    if (!existing) return undefined;
+
+    if (existing.expiresAt <= now) {
+      await this.state.storage.delete(key);
+      return undefined;
+    }
+
+    return existing;
+  }
+
   /**
    * Atomic check-and-set for an incoming webhook event.
-   * If the event is not seen (or has an expired pending lease), marks as 'pending' and returns isNew: true.
-   * If already delivered or active pending, returns isNew: false.
+   * If the event has not been seen, has expired, or has an abandoned pending lease,
+   * it is marked pending and accepted. Delivered or active-pending events are rejected.
    */
   async checkAndSet(
     eventId: string,
-    ttlSeconds: number = 86400,
-    pendingLeaseMs: number = 30000
+    ttlSeconds: number = DEFAULT_TTL_SECONDS,
+    pendingLeaseMs: number = DEFAULT_PENDING_LEASE_MS
   ): Promise<CheckAndSetResult> {
-    const key = `event:${eventId}`;
+    const key = this.eventKey(eventId);
     const now = Date.now();
-    const existing = await this.state.storage.get<EventStateRecord>(key);
+    const normalizedTtl = normalizeTtlSeconds(ttlSeconds);
+    const normalizedLease = normalizePendingLeaseMs(pendingLeaseMs);
+    const existing = await this.getLiveRecord(key, now);
 
     if (existing) {
       if (existing.status === "delivered") {
         return { isNew: false, status: "duplicate" };
       }
-      if (existing.status === "pending") {
-        if (now - existing.createdAt < pendingLeaseMs) {
-          return { isNew: false, status: "pending_in_progress" };
-        }
-        // Pending lease expired without delivery confirmation: allow recovery
+      if (existing.status === "pending" && now - existing.createdAt < normalizedLease) {
+        return { isNew: false, status: "pending_in_progress" };
       }
+      // Pending lease expired without delivery confirmation: overwrite and recover.
     }
 
+    const expiresAt = now + normalizedTtl * 1000;
     const record: EventStateRecord = {
       status: "pending",
       createdAt: now,
-      expiresAt: now + ttlSeconds * 1000,
+      expiresAt,
     };
-    await this.state.storage.put(key, record, { expirationTtl: ttlSeconds });
+    await this.state.storage.put(key, record);
+    await this.scheduleCleanup(expiresAt);
     return { isNew: true, status: "new" };
   }
 
-  /**
-   * Mark event as successfully delivered downstream (e.g. enqueued to Queue).
-   */
-  async markDelivered(eventId: string, ttlSeconds: number = 86400): Promise<void> {
-    const key = `event:${eventId}`;
+  /** Mark an event as successfully delivered downstream (for example, Queue enqueue). */
+  async markDelivered(eventId: string, ttlSeconds: number = DEFAULT_TTL_SECONDS): Promise<void> {
+    const key = this.eventKey(eventId);
     const now = Date.now();
-    const existing = await this.state.storage.get<EventStateRecord>(key);
-    const createdAt = existing?.createdAt ?? now;
+    const normalizedTtl = normalizeTtlSeconds(ttlSeconds);
+    const existing = await this.getLiveRecord(key, now);
+    const expiresAt = now + normalizedTtl * 1000;
 
     const record: EventStateRecord = {
       status: "delivered",
-      createdAt,
+      createdAt: existing?.createdAt ?? now,
       deliveredAt: now,
-      expiresAt: now + ttlSeconds * 1000,
+      expiresAt,
     };
-    await this.state.storage.put(key, record, { expirationTtl: ttlSeconds });
+    await this.state.storage.put(key, record);
+    await this.scheduleCleanup(expiresAt);
   }
 
-  /**
-   * Release pending status on failure so Meta can retry and succeed immediately.
-   */
+  /** Release pending status on downstream failure so Meta can retry immediately. */
   async releasePending(eventId: string): Promise<void> {
-    const key = `event:${eventId}`;
-    await this.state.storage.delete(key);
+    await this.state.storage.delete(this.eventKey(eventId));
   }
 
-  /**
-   * Check if event was already delivered or is currently pending.
-   */
-  async isDuplicate(eventId: string): Promise<boolean> {
-    const key = `event:${eventId}`;
-    const existing = await this.state.storage.get<EventStateRecord>(key);
+  /** Check whether an event is still inside the deduplication window. */
+  async isDuplicate(eventId: string, pendingLeaseMs: number = DEFAULT_PENDING_LEASE_MS): Promise<boolean> {
+    const now = Date.now();
+    const existing = await this.getLiveRecord(this.eventKey(eventId), now);
     if (!existing) return false;
     if (existing.status === "delivered") return true;
-    if (existing.status === "pending") {
-      return Date.now() - existing.createdAt < 30000;
-    }
-    return false;
+    return now - existing.createdAt < normalizePendingLeaseMs(pendingLeaseMs);
   }
 
   /**
-   * HTTP endpoint handler for DO RPC / fetch invocations.
+   * Alarm-driven garbage collection. Durable Object storage has no native per-key TTL,
+   * so expired records are deleted and the next alarm is scheduled for the earliest
+   * remaining expiry.
    */
+  async alarm(): Promise<void> {
+    const storage = this.state.storage;
+    if (!storage.list) return;
+
+    const now = Date.now();
+    const records = await storage.list<EventStateRecord>({ prefix: EVENT_KEY_PREFIX });
+    let nextExpiry: number | null = null;
+
+    for (const [key, record] of records.entries()) {
+      if (!record || typeof record.expiresAt !== "number" || record.expiresAt <= now) {
+        await storage.delete(key);
+        continue;
+      }
+      if (nextExpiry === null || record.expiresAt < nextExpiry) {
+        nextExpiry = record.expiresAt;
+      }
+    }
+
+    if (nextExpiry !== null && storage.setAlarm) {
+      await storage.setAlarm(nextExpiry);
+    } else if (storage.deleteAlarm) {
+      await storage.deleteAlarm();
+    }
+  }
+
+  /** HTTP endpoint handler for DO RPC / fetch invocations. */
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "POST") {
@@ -156,7 +232,7 @@ export class InstagramWebhookDeduplicatorDO {
       }
 
       if (url.pathname === "/is-duplicate") {
-        const isDup = await this.isDuplicate(eventId);
+        const isDup = await this.isDuplicate(eventId, body.pendingLeaseMs);
         return new Response(JSON.stringify({ isDuplicate: isDup, eventId }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
