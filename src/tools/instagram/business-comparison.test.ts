@@ -182,6 +182,7 @@ describe("ig_compare_businesses tool", () => {
     expect(payload.summary.failed_accounts).toBe(1);
 
     expect(payload.accounts[0].status).toBe("ok");
+    expect(payload.accounts[0].posting_frequency_status).toBeDefined();
     expect(payload.accounts[1].status).toBe("not_found");
     expect(payload.accounts[1].error_message).toContain("does not exist");
     expect(payload.accounts[1]).not.toHaveProperty("followers_count");

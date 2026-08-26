@@ -112,6 +112,7 @@ describe("competitor-analytics utils", () => {
       expect(report.sample.posts_analyzed).toBe(1);
       expect(report.sample.observed_period.duration_days).toBe(0);
       expect(report.sample.posts_per_week).toBeNull();
+      expect(report.sample.posting_frequency_status).toBe("insufficient_posts");
       expect(report.sample.average_posting_interval_hours).toBeNull();
     });
 
@@ -139,6 +140,7 @@ describe("competitor-analytics utils", () => {
       expect(report.sample.posts_analyzed).toBe(3);
       expect(report.sample.observed_period.duration_days).toBe(0.67);
       expect(report.sample.posts_per_week).toBeNull();
+      expect(report.sample.posting_frequency_status).toBe("insufficient_observation_window");
       expect(report.sample.average_posting_interval_hours).toBe(8);
     });
 
@@ -165,7 +167,22 @@ describe("competitor-analytics utils", () => {
 
       expect(report.sample.observed_period.duration_days).toBe(4);
       expect(report.sample.posts_per_week).toBe(3.5);
+      expect(report.sample.posting_frequency_status).toBe("available");
       expect(report.sample.average_posting_interval_hours).toBe(48);
+    });
+
+    it("distinguishes missing valid timestamps from a genuinely small sample", () => {
+      const invalidTimestamps = [
+        normalizeMediaItem({ id: "bad-ts-1", media_type: "IMAGE", timestamp: "invalid" }),
+        normalizeMediaItem({ id: "bad-ts-2", media_type: "IMAGE", timestamp: "invalid" }),
+        normalizeMediaItem({ id: "bad-ts-3", media_type: "IMAGE", timestamp: "invalid" }),
+      ];
+
+      const report = analyzeCompetitorMedia(account, invalidTimestamps);
+
+      expect(report.sample.posts_analyzed).toBe(3);
+      expect(report.sample.posts_per_week).toBeNull();
+      expect(report.sample.posting_frequency_status).toBe("insufficient_valid_timestamps");
     });
 
     it("computes complete deterministic analysis report", () => {

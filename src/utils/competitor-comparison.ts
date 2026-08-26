@@ -10,6 +10,7 @@ export interface CompetitorComparisonSuccessItem {
   media_count?: number;
   posts_analyzed: number;
   posts_per_week: number | null;
+  posting_frequency_status: CompetitorAnalysisReport["sample"]["posting_frequency_status"];
   public_engagement_rate: {
     average: number;
     median: number;
@@ -75,6 +76,7 @@ export function fromAnalysisReport(report: CompetitorAnalysisReport): Competitor
     media_count: report.account.media_count,
     posts_analyzed: report.sample.posts_analyzed,
     posts_per_week: report.sample.posts_per_week,
+    posting_frequency_status: report.sample.posting_frequency_status,
     public_engagement_rate: {
       average: report.metrics.public_engagement_rate.average,
       median: report.metrics.public_engagement_rate.median,

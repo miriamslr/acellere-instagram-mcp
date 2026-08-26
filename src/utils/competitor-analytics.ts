@@ -82,6 +82,12 @@ export interface RankedPostSummary {
   public_engagement_rate: number;
 }
 
+export type PostingFrequencyStatus =
+  | "available"
+  | "insufficient_posts"
+  | "insufficient_valid_timestamps"
+  | "insufficient_observation_window";
+
 export interface CompetitorAnalysisReport {
   [key: string]: unknown;
   account: {
@@ -103,6 +109,7 @@ export interface CompetitorAnalysisReport {
       duration_days: number;
     };
     posts_per_week: number | null;
+    posting_frequency_status: PostingFrequencyStatus;
     average_posting_interval_hours: number | null;
   };
   metrics: {
@@ -229,6 +236,7 @@ export function analyzeCompetitorMedia(
   let endIso: string | null = null;
   let durationDays = 0;
   let postsPerWeek: number | null = null;
+  let postingFrequencyStatus: PostingFrequencyStatus = "insufficient_posts";
   let avgIntervalHours: number | null = null;
 
   const firstTimestamp = timestamps[0];
@@ -253,13 +261,17 @@ export function analyzeCompetitorMedia(
       avgIntervalHours = calculateMean(intervals);
     }
 
-    if (
-      timestamps.length >= MIN_FREQUENCY_SAMPLE_POSTS &&
-      observedSpanMs >= MIN_FREQUENCY_WINDOW_MS
-    ) {
+    if (postsAnalyzed >= MIN_FREQUENCY_SAMPLE_POSTS && timestamps.length < MIN_FREQUENCY_SAMPLE_POSTS) {
+      postingFrequencyStatus = "insufficient_valid_timestamps";
+    } else if (timestamps.length < MIN_FREQUENCY_SAMPLE_POSTS) {
+      postingFrequencyStatus = "insufficient_posts";
+    } else if (observedSpanMs < MIN_FREQUENCY_WINDOW_MS) {
+      postingFrequencyStatus = "insufficient_observation_window";
+    } else {
       const observedIntervals = timestamps.length - 1;
       const observedSpanDays = observedSpanMs / DAY_MS;
       postsPerWeek = Number(((observedIntervals / observedSpanDays) * 7).toFixed(2));
+      postingFrequencyStatus = "available";
     }
   }
 
@@ -449,6 +461,7 @@ export function analyzeCompetitorMedia(
         duration_days: durationDays,
       },
       posts_per_week: postsPerWeek,
+      posting_frequency_status: postingFrequencyStatus,
       average_posting_interval_hours: avgIntervalHours,
     },
     metrics: {
