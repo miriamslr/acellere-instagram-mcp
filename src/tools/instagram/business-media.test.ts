@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   registerIgBusinessMediaTools,
   buildBusinessMediaQuery,
+  parseBusinessDiscoveryData,
 } from "./business-media.js";
 import { MetaClient } from "../../services/meta-client.js";
 import { makeMockCache } from "../test-utils.js";
@@ -93,6 +94,31 @@ function makeMockClient(mockData?: unknown): MetaClient {
     ...makeMockCache(),
   } as unknown as MetaClient;
 }
+
+
+describe("parseBusinessDiscoveryData", () => {
+  it("parses Meta JSON returned inside the raw text wrapper used in production", () => {
+    const parsed = parseBusinessDiscoveryData({
+      raw: JSON.stringify({
+        business_discovery: {
+          username: "targetbrand",
+          media_count: 1,
+          media: { data: [{ id: "post-raw", media_type: "IMAGE" }] },
+        },
+      }),
+      success: true,
+    });
+
+    expect(parsed.business_discovery?.username).toBe("targetbrand");
+    expect(parsed.business_discovery?.media?.data).toHaveLength(1);
+  });
+
+  it("rejects a non-JSON raw payload instead of silently returning zero media", () => {
+    expect(() => parseBusinessDiscoveryData({ raw: "not-json", success: true })).toThrow(
+      "Meta returned an unparseable JSON payload"
+    );
+  });
+});
 
 describe("buildBusinessMediaQuery", () => {
   it("builds query with all requested children and media URLs", () => {
@@ -193,6 +219,69 @@ describe("ig_get_business_media tool", () => {
     const payload = JSON.parse(result.content[0].text);
     // post-1 is 2026-05-01 so it should be excluded
     expect(payload.media.map((p: { id: string }) => p.id)).toEqual(["post-2", "post-3"]);
+  });
+
+  it("parses the production raw JSON wrapper and returns media", async () => {
+    client = makeMockClient({
+      raw: JSON.stringify({
+        business_discovery: {
+          id: "1784140001",
+          username: "targetbrand",
+          followers_count: 10000,
+          media_count: 1,
+          media: {
+            data: [
+              {
+                id: "raw-post-1",
+                media_type: "IMAGE",
+                timestamp: "2026-05-04T12:00:00Z",
+                like_count: 42,
+                comments_count: 3,
+              },
+            ],
+          },
+        },
+      }),
+      success: true,
+    });
+    server = makeMockServer();
+    registerIgBusinessMediaTools(server as never, client);
+
+    const handler = server.tools.get("ig_get_business_media");
+    const result = (await handler!({ username: "targetbrand", limit: 5 })) as {
+      content: { type: string; text: string }[];
+    };
+    const payload = JSON.parse(result.content[0].text);
+
+    expect(payload.account.followers_count).toBe(10000);
+    expect(payload.media).toHaveLength(1);
+    expect(payload.media[0].id).toBe("raw-post-1");
+  });
+
+  it("returns an explicit error when an account reports posts but media collection is empty", async () => {
+    client = makeMockClient({
+      raw: JSON.stringify({
+        business_discovery: {
+          id: "1784140001",
+          username: "targetbrand",
+          followers_count: 10000,
+          media_count: 50,
+          media: { data: [] },
+        },
+      }),
+      success: true,
+    });
+    server = makeMockServer();
+    registerIgBusinessMediaTools(server as never, client);
+
+    const handler = server.tools.get("ig_get_business_media");
+    const result = (await handler!({ username: "targetbrand" })) as {
+      isError?: boolean;
+      content: { type: string; text: string }[];
+    };
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("account reports 50 posts but Meta returned no public media");
   });
 
   it("handles client errors gracefully with formatErrorResponse", async () => {

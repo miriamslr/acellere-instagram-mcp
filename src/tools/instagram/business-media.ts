@@ -58,6 +58,29 @@ export function buildBusinessMediaQuery(options: BuildBusinessMediaQueryOptions)
   return `business_discovery.username(${username}){${accountFields},${mediaClause}}`;
 }
 
+export function parseBusinessDiscoveryData(data: Record<string, unknown>): RawBusinessDiscoveryData {
+  if (data.business_discovery && typeof data.business_discovery === "object") {
+    return data as RawBusinessDiscoveryData;
+  }
+
+  const raw = data.raw;
+  if (typeof raw !== "string") {
+    return data as RawBusinessDiscoveryData;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Parsed payload is not an object");
+    }
+    return parsed as RawBusinessDiscoveryData;
+  } catch {
+    throw new Error(
+      "Business media collection failed: Meta returned an unparseable JSON payload."
+    );
+  }
+}
+
 export interface FetchBusinessMediaParams {
   client: MetaClient;
   username: string;
@@ -104,12 +127,21 @@ export async function fetchBusinessMedia(params: FetchBusinessMediaParams): Prom
     });
 
     lastRateLimit = response.rateLimit;
-    const rawData = response.data as RawBusinessDiscoveryData;
-    const bd = rawData?.business_discovery;
-    if (!bd) break;
+    const rawData = parseBusinessDiscoveryData(response.data);
+    const bd = rawData.business_discovery;
+    if (!bd) {
+      throw new Error(
+        `Business media collection failed for @${username}: Meta response did not include business_discovery.`
+      );
+    }
 
     lastAccountData = { ...bd };
     const pageItems = bd.media?.data ?? [];
+    if (i === 0 && !after && pageItems.length === 0 && (bd.media_count ?? 0) > 0) {
+      throw new Error(
+        `Business media collection failed for @${username}: account reports ${bd.media_count} posts but Meta returned no public media.`
+      );
+    }
     collectedItems.push(...pageItems);
 
     const paging = bd.media?.paging;

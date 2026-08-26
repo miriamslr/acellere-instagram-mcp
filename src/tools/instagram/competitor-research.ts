@@ -230,7 +230,7 @@ export function registerIgCompetitorResearchTools(
 
               if (/not found|does not exist|non-existent/i.test(message)) {
                 status = "not_found";
-              } else if (/unsupported|personal|permission|capability|business/i.test(message)) {
+              } else if (/unsupported|personal|permission|capability|not eligible|not (?:a )?(?:business|creator|professional)|(?:business|creator|professional) account (?:is )?required/i.test(message)) {
                 status = "unsupported";
               }
 

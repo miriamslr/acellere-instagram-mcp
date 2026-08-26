@@ -72,6 +72,14 @@ describe("business-discovery-validator", () => {
       expect(result.unsupportedFields).toContain("comments");
     });
 
+    it("accepts public comments_count without mistaking it for comments expansion", () => {
+      const result = validateBusinessDiscoveryFields(
+        "id,media{id,caption,like_count,comments_count}"
+      );
+      expect(result.valid).toBe(true);
+      expect(result.unsupportedFields).not.toContain("comments");
+    });
+
     it("rejects nested comments in media expansion", () => {
       const result = validateBusinessDiscoveryFields("id,media{id,caption,comments}");
       expect(result.valid).toBe(false);
