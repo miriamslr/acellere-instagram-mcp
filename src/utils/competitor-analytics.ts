@@ -236,7 +236,10 @@ export function analyzeCompetitorMedia(
   let endIso: string | null = null;
   let durationDays = 0;
   let postsPerWeek: number | null = null;
-  let postingFrequencyStatus: PostingFrequencyStatus = "insufficient_posts";
+  let postingFrequencyStatus: PostingFrequencyStatus =
+    postsAnalyzed >= MIN_FREQUENCY_SAMPLE_POSTS && timestamps.length < MIN_FREQUENCY_SAMPLE_POSTS
+      ? "insufficient_valid_timestamps"
+      : "insufficient_posts";
   let avgIntervalHours: number | null = null;
 
   const firstTimestamp = timestamps[0];
