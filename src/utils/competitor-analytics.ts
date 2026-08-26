@@ -102,8 +102,8 @@ export interface CompetitorAnalysisReport {
       end: string | null;
       duration_days: number;
     };
-    posts_per_week: number;
-    average_posting_interval_hours: number;
+    posts_per_week: number | null;
+    average_posting_interval_hours: number | null;
   };
   metrics: {
     likes: MetricSummary;
@@ -224,8 +224,8 @@ export function analyzeCompetitorMedia(
   let startIso: string | null = null;
   let endIso: string | null = null;
   let durationDays = 0;
-  let postsPerWeek = 0;
-  let avgIntervalHours = 0;
+  let postsPerWeek: number | null = null;
+  let avgIntervalHours: number | null = null;
 
   const firstTimestamp = timestamps[0];
   const lastTimestamp = timestamps[timestamps.length - 1];
@@ -235,10 +235,10 @@ export function analyzeCompetitorMedia(
     endIso = new Date(lastTimestamp).toISOString();
     const diffMs = Math.max(1000, lastTimestamp - firstTimestamp);
     durationDays = Number((diffMs / (1000 * 60 * 60 * 24)).toFixed(2));
-    const effectiveDays = Math.max(1, durationDays);
-    postsPerWeek = Number(((postsAnalyzed / effectiveDays) * 7).toFixed(2));
-
     if (timestamps.length > 1) {
+      const effectiveDays = Math.max(1, durationDays);
+      postsPerWeek = Number(((postsAnalyzed / effectiveDays) * 7).toFixed(2));
+
       const intervals: number[] = [];
       for (let i = 1; i < timestamps.length; i++) {
         const curr = timestamps[i];
