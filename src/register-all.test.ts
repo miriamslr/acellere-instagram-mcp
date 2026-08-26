@@ -61,6 +61,7 @@ describe("registerAll", () => {
       "ig_untrack_business",
       "ig_get_business_history",
       "ig_run_competitor_collection",
+      "ig_competitor_research",
       "ig_search_hashtag",
       "ig_get_hashtag",
       "ig_get_hashtag_recent",
