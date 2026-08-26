@@ -1,9 +1,9 @@
 import type { CompetitorAnalysisReport } from "./competitor-analytics.js";
 
-export interface CompetitorComparisonItem {
+export interface CompetitorComparisonSuccessItem {
   username: string;
-  status: "ok" | "not_found" | "unsupported" | "error";
-  error_message?: string;
+  status: "ok";
+  error_message?: never;
   name?: string;
   followers_count: number;
   follows_count?: number;
@@ -27,6 +27,16 @@ export interface CompetitorComparisonItem {
     like_count: number | null;
   };
 }
+
+export interface CompetitorComparisonFailureItem {
+  username: string;
+  status: "not_found" | "unsupported" | "error";
+  error_message: string;
+}
+
+export type CompetitorComparisonItem =
+  | CompetitorComparisonSuccessItem
+  | CompetitorComparisonFailureItem;
 
 export interface LeaderEntry {
   username: string;
@@ -87,10 +97,12 @@ export function fromAnalysisReport(report: CompetitorAnalysisReport): Competitor
 }
 
 export function extractLeaders(accounts: CompetitorComparisonItem[]): CompetitorLeaders {
-  const okAccounts = accounts.filter((a) => a.status === "ok");
+  const okAccounts = accounts.filter(
+    (a): a is CompetitorComparisonSuccessItem => a.status === "ok"
+  );
 
   const findMax = (
-    getValue: (a: CompetitorComparisonItem) => number | null | undefined
+    getValue: (a: CompetitorComparisonSuccessItem) => number | null | undefined
   ): LeaderEntry | null => {
     let maxVal = -Infinity;
     let leader: string | null = null;
