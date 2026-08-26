@@ -16,8 +16,20 @@ import {
   type CloudflareQueueLike,
 } from "./services/webhook-normalizer.js";
 import { InstagramWebhookDeduplicatorDO } from "./services/webhook-deduplicator-do.js";
+import { ActiveInstagramConnectionDO } from "./services/active-instagram-connection-do.js";
+import {
+  disconnectActiveInstagramConnection,
+  getSafeActiveInstagramConnectionStatus,
+  resolveActiveInstagramConnection,
+  type ResolvedActiveInstagramConnection,
+} from "./services/active-instagram-connection.js";
+import {
+  handleInstagramOAuthRequest,
+  type InstagramOAuthControllerEnv,
+} from "./services/instagram-oauth-controller.js";
+import { registerIgActiveConnectionTools } from "./tools/instagram/active-connection.js";
 
-export { InstagramWebhookDeduplicatorDO };
+export { InstagramWebhookDeduplicatorDO, ActiveInstagramConnectionDO };
 
 export const SERVER_VERSION = "8.0.0";
 
@@ -25,25 +37,19 @@ export const SERVER_INSTRUCTIONS = [
   "Acellere Instagram MCP, based on meta-mcp, for managing Instagram and related Meta Graph API capabilities.",
   "The Acellere fork starts in server-enforced read-only mode. Set ACELLERE_WRITE_MODE=write only when mutations are intentionally enabled.",
   "DELETE requests remain blocked unless ACELLERE_ALLOW_DESTRUCTIVE=true is also set.",
-  "Instagram tools require INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID; Threads tools require THREADS_ACCESS_TOKEN and THREADS_USER_ID.",
+  "Instagram tools use the single active OAuth connection when one exists; otherwise they fall back to INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID from the environment.",
+  "Use ig_get_active_connection to inspect which account source is active without exposing tokens.",
+  "Threads tools continue to use THREADS_ACCESS_TOKEN and THREADS_USER_ID.",
   "Token-rotation tools (meta_exchange_token, meta_refresh_token) additionally need META_APP_ID and META_APP_SECRET.",
   "Most publishing tools follow a two-step flow internally: create a container, wait for processing (up to 30s for images, up to 5 minutes for videos), then publish — exposed as a single MCP tool call.",
   "When the client sets a progressToken on a publish call, the server emits notifications/progress events while polling container status.",
   "Tool responses include a _rateLimit field when the Meta API returns rate-limit headers; check it to throttle subsequent calls.",
 ].join(" ");
 
-export interface WorkerEnv {
-  AUTH_TOKEN?: string;
+export interface WorkerEnv extends InstagramOAuthControllerEnv {
   INSTAGRAM_WEBHOOK_VERIFY_TOKEN?: string;
-  INSTAGRAM_ACCESS_TOKEN?: string;
-  INSTAGRAM_USER_ID?: string;
-  FACEBOOK_PAGE_ID?: string;
-  INSTAGRAM_API_MODE?: string;
-  META_API_VERSION?: string;
   ACELLERE_WRITE_MODE?: string;
   ACELLERE_ALLOW_DESTRUCTIVE?: string | boolean;
-  META_APP_ID?: string;
-  META_APP_SECRET?: string;
   THREADS_ACCESS_TOKEN?: string;
   THREADS_USER_ID?: string;
   KV_DEDUPLICATION?: CloudflareKVLike;
@@ -63,13 +69,32 @@ export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, mcp-session-id, mcp-protocol-version, mcp-method, mcp-name",
 };
 
-export function buildWorkerServer(env: WorkerEnv): McpServer {
+function legacyConnectionFromEnv(env: WorkerEnv): ResolvedActiveInstagramConnection {
+  const token = env.INSTAGRAM_ACCESS_TOKEN ?? "";
+  const userId = env.INSTAGRAM_USER_ID ?? "";
+  const configuredFields = [token, userId].filter(Boolean).length;
+  return {
+    source: configuredFields > 0 ? "env-fallback" : "none",
+    loginMode: env.INSTAGRAM_API_MODE === "instagram-login" ? "instagram-login" : "facebook-login",
+    instagramAccessToken: token,
+    instagramUserId: userId,
+    facebookPageId: env.FACEBOOK_PAGE_ID ?? "",
+    tokenStatus: configuredFields === 2 ? "valid" : configuredFields === 0 ? "not_configured" : "partial_configuration",
+    scopes: [],
+  };
+}
+
+export function buildWorkerServer(
+  env: WorkerEnv,
+  resolvedConnection?: ResolvedActiveInstagramConnection
+): McpServer {
+  const active = resolvedConnection ?? legacyConnectionFromEnv(env);
   const config: MetaConfig = {
     appId: env.META_APP_ID ?? "",
     appSecret: env.META_APP_SECRET ?? "",
-    facebookPageId: env.FACEBOOK_PAGE_ID ?? "",
-    instagramAccessToken: env.INSTAGRAM_ACCESS_TOKEN ?? "",
-    instagramUserId: env.INSTAGRAM_USER_ID ?? "",
+    facebookPageId: active.facebookPageId,
+    instagramAccessToken: active.instagramAccessToken,
+    instagramUserId: active.instagramUserId,
     threadsAccessToken: env.THREADS_ACCESS_TOKEN ?? "",
     threadsUserId: env.THREADS_USER_ID ?? "",
   };
@@ -77,7 +102,7 @@ export function buildWorkerServer(env: WorkerEnv): McpServer {
   const server = new McpServer(
     {
       name: "acellere-instagram-mcp",
-      version: "8.0.0",
+      version: SERVER_VERSION,
     },
     {
       instructions: SERVER_INSTRUCTIONS,
@@ -90,18 +115,27 @@ export function buildWorkerServer(env: WorkerEnv): McpServer {
     writeMode: (env.ACELLERE_WRITE_MODE as "read-only" | "write") ?? "read-only",
     allowDestructive:
       env.ACELLERE_ALLOW_DESTRUCTIVE === true || env.ACELLERE_ALLOW_DESTRUCTIVE === "true",
-    instagramApiMode:
-      (env.INSTAGRAM_API_MODE as "facebook-login" | "instagram-login") ?? "facebook-login",
+    instagramApiMode: active.loginMode,
     metaApiVersion: env.META_API_VERSION,
   });
 
   registerAll(server, client);
+  registerIgActiveConnectionTools(server, {
+    getStatus: () => getSafeActiveInstagramConnectionStatus(env),
+    disconnect: async () => {
+      const removed = await disconnectActiveInstagramConnection(env);
+      return {
+        removed,
+        active_connection: await getSafeActiveInstagramConnectionStatus(env),
+      };
+    },
+  });
   return server;
 }
 
 export function verifyAuth(request: Request, env: WorkerEnv): boolean {
   if (!env.AUTH_TOKEN) {
-    // If no AUTH_TOKEN is configured in the environment, allow access
+    // Legacy MCP behavior retained until production-hardening issue #48 lands.
     return true;
   }
   const url = new URL(request.url);
@@ -120,6 +154,18 @@ export default {
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    if (path.startsWith("/auth/")) {
+      try {
+        const oauthResponse = await handleInstagramOAuthRequest(request, env, CORS_HEADERS);
+        if (oauthResponse) return oauthResponse;
+      } catch {
+        return new Response(
+          JSON.stringify({ error: "oauth_internal_error" }),
+          { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store" } }
+        );
+      }
     }
 
     if (path === "/health") {
@@ -141,6 +187,9 @@ export default {
             health: "/health",
             mcp: "/mcp",
             webhooks: "/webhooks/instagram",
+            oauth_status: "/auth/status",
+            instagram_oauth_start: "/auth/instagram/start",
+            facebook_oauth_start: "/auth/facebook/start",
           },
         }),
         {
@@ -233,7 +282,6 @@ export default {
       }
     }
 
-    // Protect MCP endpoint
     if (path === "/mcp" || path === "/sse") {
       if (!verifyAuth(request, env)) {
         return new Response(
@@ -252,9 +300,10 @@ export default {
       }
 
       try {
-        const server = buildWorkerServer(env);
+        const activeConnection = await resolveActiveInstagramConnection(env);
+        const server = buildWorkerServer(env, activeConnection);
         const transport = new WebStandardStreamableHTTPServerTransport({
-          sessionIdGenerator: undefined, // stateless mode for remote MCP
+          sessionIdGenerator: undefined,
           enableJsonResponse: true,
         });
         await server.connect(transport);
@@ -262,9 +311,7 @@ export default {
 
         const responseHeaders = new Headers(response.headers);
         for (const [key, value] of Object.entries(CORS_HEADERS)) {
-          if (!responseHeaders.has(key)) {
-            responseHeaders.set(key, value);
-          }
+          if (!responseHeaders.has(key)) responseHeaders.set(key, value);
         }
 
         return new Response(response.body, {

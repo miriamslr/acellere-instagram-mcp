@@ -20,6 +20,10 @@
       {
         "name": "WEBHOOK_DEDUPLICATOR_DO",
         "class_name": "InstagramWebhookDeduplicatorDO"
+      },
+      {
+        "name": "ACTIVE_INSTAGRAM_CONNECTION_DO",
+        "class_name": "ActiveInstagramConnectionDO"
       }
     ]
   },
@@ -28,6 +32,12 @@
       "tag": "v1",
       "new_sqlite_classes": [
         "InstagramWebhookDeduplicatorDO"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "ActiveInstagramConnectionDO"
       ]
     }
   ],
@@ -45,6 +55,9 @@
     "INSTAGRAM_API_MODE": "facebook-login",
     "META_API_VERSION": "v26.0",
     "ACELLERE_WRITE_MODE": "read-only",
-    "ACELLERE_ALLOW_DESTRUCTIVE": "false"
+    "ACELLERE_LOCAL_STATE_WRITE_MODE": "write",
+    "ACELLERE_ALLOW_DESTRUCTIVE": "false",
+    "FACEBOOK_OAUTH_REDIRECT_URI": "https://acellere-instagram-mcp.acellere-mcps.workers.dev/auth/facebook/callback",
+    "INSTAGRAM_OAUTH_REDIRECT_URI": "https://acellere-instagram-mcp.acellere-mcps.workers.dev/auth/instagram/callback"
   }
 }
