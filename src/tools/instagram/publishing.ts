@@ -370,4 +370,52 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
       }
     }
   );
+
+  // ─── ig_create_resumable_upload_session ─────────────────────
+  server.registerTool(
+    "ig_create_resumable_upload_session",
+    {
+      description:
+        "Create a resumable upload session container for Reels or Stories via upload_type=resumable. " +
+        "Returns the created container ID and the resumable upload URI (rupload.facebook.com) for binary chunk streaming. Write.",
+      inputSchema: {
+        media_type: z.enum(["REELS", "STORIES"]).optional().default("REELS").describe("Media type (default: REELS)"),
+        caption: captionSchema.describe("Post caption (max 2200 chars)"),
+        cover_url: httpsUrl.optional().describe("Cover image URL"),
+        thumb_offset: z.number().optional().describe("Thumbnail offset in ms"),
+        location_id: z.string().optional().describe("Facebook Page location ID"),
+        share_to_feed: z.boolean().optional().describe("Share Reel to main feed (default: true)"),
+        collaborators: collaboratorsSchema,
+        audio_name: z.string().optional().describe("Custom audio name for Reel"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ media_type, caption, cover_url, thumb_offset, location_id, share_to_feed, collaborators, audio_name }) => {
+      try {
+        const params = buildParams(
+          {
+            upload_type: "resumable",
+            media_type,
+          },
+          {
+            caption,
+            cover_url,
+            thumb_offset,
+            location_id,
+            share_to_feed,
+            collaborators: collaborators?.length ? JSON.stringify(collaborators) : undefined,
+            audio_name,
+          }
+        );
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/media`,
+          params
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Create resumable upload session");
+      }
+    }
+  );
 }

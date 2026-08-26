@@ -1066,4 +1066,39 @@ describe("ig_publish_video / _reel / _story error context", () => {
     expect(call[0]).toBe("GET");
     expect(call[1]).toBe("/1784140001/content_publishing_limit");
   });
+
+  it("ig_create_resumable_upload_session creates resumable container and returns upload uri", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      ig: vi.fn(async () => ({
+        data: {
+          id: "resumable-container-999",
+          uri: "https://rupload.facebook.com/ig-video-upload/v26.0/1784140001",
+        },
+        rateLimit: undefined,
+      })),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    registerIgPublishingTools(server as never, client);
+    const handler = server.tools.get("ig_create_resumable_upload_session")!;
+    const result = (await handler({
+      media_type: "REELS",
+      caption: "Resumable Reel Upload",
+    })) as { content: { text: string }[] };
+
+    const payload = JSON.parse(result.content[0].text) as { id: string; uri: string };
+    expect(payload.id).toBe("resumable-container-999");
+    expect(payload.uri).toContain("rupload.facebook.com");
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("POST");
+    expect(call[1]).toBe("/1784140001/media");
+    expect(call[2]).toEqual({
+      upload_type: "resumable",
+      media_type: "REELS",
+      caption: "Resumable Reel Upload",
+    });
+  });
 });

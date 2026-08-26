@@ -184,43 +184,118 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
     }
   );
 
+  // ─── ig_send_sticker ─────────────────────────────────────────
+  server.registerTool(
+    "ig_send_sticker",
+    {
+      description: "Send a sticker (e.g. like_heart) direct message to a user via the official Instagram Send API. Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
+        sticker_type: z.enum(["like_heart"]).optional().default("like_heart").describe("Sticker attachment type (default: like_heart)"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, sticker_type }) => {
+      try {
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          message: {
+            attachment: {
+              type: sticker_type,
+            },
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send sticker");
+      }
+    }
+  );
+
+  // ─── ig_send_published_post ──────────────────────────────────
+  server.registerTool(
+    "ig_send_published_post",
+    {
+      description: "Share an existing published Instagram post into a direct message using MEDIA_SHARE attachment. Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
+        media_id: metaId.describe("ID of the published Instagram media post to share"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, media_id }) => {
+      try {
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          message: {
+            attachment: {
+              type: "MEDIA_SHARE",
+              payload: {
+                id: media_id,
+              },
+            },
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send published post");
+      }
+    }
+  );
+
   // ─── ig_send_quick_replies ───────────────────────────────────
   server.registerTool(
     "ig_send_quick_replies",
     {
       description:
-        "Send a text message with quick reply button options (up to 13 buttons) to guide the user's response in Instagram Direct. Write.",
+        "Send a text message with quick reply button options (up to 13 items). Supports text buttons, user_phone_number, and user_email. Write.",
       inputSchema: {
         recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
-        text: z.string().min(1).max(1000).describe("Prompt text displayed above quick reply buttons"),
+        text: z.string().min(1).max(1000).describe("Prompt text displayed above quick reply options"),
         quick_replies: z
           .array(
-            z.object({
-              title: z.string().min(1).max(20).describe("Button label (max 20 chars)"),
-              payload: z.string().min(1).max(1000).describe("Custom developer payload sent when clicked"),
-              image_url: z.string().url().optional().describe("Optional button icon image URL"),
-            })
+            z.discriminatedUnion("content_type", [
+              z.object({
+                content_type: z.literal("text"),
+                title: z.string().min(1).max(20).describe("Button label (max 20 chars)"),
+                payload: z.string().min(1).max(1000).describe("Custom developer payload sent when clicked"),
+                image_url: z.string().url().optional().describe("Optional button icon image URL"),
+              }),
+              z.object({
+                content_type: z.literal("user_phone_number"),
+              }),
+              z.object({
+                content_type: z.literal("user_email"),
+              }),
+            ])
           )
           .min(1)
           .max(13)
-          .describe("Array of quick reply options (1 to 13 buttons)"),
+          .describe("Array of quick reply options (1 to 13 items)"),
       },
       annotations: WRITE_TOOL,
     },
     async ({ recipient_id, text, quick_replies }) => {
       try {
-        const formattedReplies = quick_replies.map((qr) => ({
-          content_type: "text",
-          title: qr.title,
-          payload: qr.payload,
-          image_url: qr.image_url,
-        }));
-
         const jsonBody = {
           recipient: { id: recipient_id },
           message: {
             text,
-            quick_replies: formattedReplies,
+            quick_replies,
           },
         };
 
@@ -356,11 +431,11 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
   server.registerTool(
     "ig_send_reaction",
     {
-      description: "React to a direct message with an emoji (e.g. ❤️, 👍, 😂, 😮, 😢, 🙏). Write.",
+      description: "React to a direct message via the official Instagram sender_action: 'react' with payload { message_id, reaction }. Standard reactions include 'love', 'haha', 'wow', 'sad', 'angry', 'like', 'dislike' or emoji. Write.",
       inputSchema: {
         recipient_id: z.string().describe("Instagram-scoped user ID of the conversation partner"),
         message_id: metaId.describe("Message ID to react to"),
-        reaction: z.string().min(1).describe("Emoji reaction character (e.g. '❤️')"),
+        reaction: z.string().min(1).describe("Reaction identifier ('love', 'haha', 'wow', 'sad', 'angry', 'like', 'dislike', or custom emoji)"),
       },
       annotations: WRITE_TOOL,
     },
@@ -369,7 +444,7 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
         const jsonBody = {
           recipient: { id: recipient_id },
           sender_action: "react",
-          reaction: {
+          payload: {
             message_id,
             reaction,
           },
@@ -392,7 +467,7 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
   server.registerTool(
     "ig_delete_reaction",
     {
-      description: "Remove an existing emoji reaction from a direct message. Write.",
+      description: "Remove an existing reaction from a direct message via sender_action: 'unreact' with payload { message_id }. Write.",
       inputSchema: {
         recipient_id: z.string().describe("Instagram-scoped user ID of the conversation partner"),
         message_id: metaId.describe("Message ID to unreact from"),
@@ -404,7 +479,7 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
         const jsonBody = {
           recipient: { id: recipient_id },
           sender_action: "unreact",
-          reaction: {
+          payload: {
             message_id,
           },
         };

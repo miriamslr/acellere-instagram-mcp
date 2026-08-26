@@ -58,7 +58,8 @@ describe("Instagram Auth Tools", () => {
     const payload = JSON.parse(result.content[0].text);
 
     expect(payload.login_mode).toBe("facebook-login");
-    expect(payload.available_capabilities_count).toBeGreaterThan(30);
+    expect(payload.official_surface.available_count).toBeGreaterThan(30);
+    expect(payload.acellere_extensions.total).toBe(6);
   });
 
   it("ig_get_connection_info returns sanitized connection details without token values", async () => {

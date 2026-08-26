@@ -9,6 +9,8 @@ const DEFAULT_MCP_HEADERS = {
 describe("Cloudflare Worker (src/worker.ts)", () => {
   const baseEnv: WorkerEnv = {
     AUTH_TOKEN: "test-auth-token-12345",
+    INSTAGRAM_WEBHOOK_VERIFY_TOKEN: "my_webhook_secret_verify_token",
+    META_APP_SECRET: "test_meta_app_secret_999",
     INSTAGRAM_ACCESS_TOKEN: "test-ig-token",
     INSTAGRAM_USER_ID: "17841421598761181",
     INSTAGRAM_API_MODE: "facebook-login",
@@ -209,6 +211,101 @@ describe("Cloudflare Worker (src/worker.ts)", () => {
     };
     expect(body.result?.isError).toBe(true);
     expect(body.result?.content?.[0]?.text).toContain("read-only mode");
+  });
+
+  describe("Webhook receiver fail-closed security", () => {
+    it("GET /webhooks/instagram succeeds only with valid verify token", async () => {
+      const validReq = new Request(
+        "https://example.com/webhooks/instagram?hub.mode=subscribe&hub.verify_token=my_webhook_secret_verify_token&hub.challenge=challenge_123",
+        { method: "GET" }
+      );
+      const validRes = await worker.fetch(validReq, baseEnv);
+      expect(validRes.status).toBe(200);
+      expect(await validRes.text()).toBe("challenge_123");
+
+      const wrongReq = new Request(
+        "https://example.com/webhooks/instagram?hub.mode=subscribe&hub.verify_token=wrong_token&hub.challenge=challenge_123",
+        { method: "GET" }
+      );
+      const wrongRes = await worker.fetch(wrongReq, baseEnv);
+      expect(wrongRes.status).toBe(403);
+
+      const noSecretEnv: WorkerEnv = { ...baseEnv, INSTAGRAM_WEBHOOK_VERIFY_TOKEN: undefined };
+      const noSecretRes = await worker.fetch(validReq, noSecretEnv);
+      expect(noSecretRes.status).toBe(403);
+    });
+
+    it("POST /webhooks/instagram fails closed when secret/signature is missing or invalid", async () => {
+      const payload = JSON.stringify({
+        object: "instagram",
+        entry: [
+          {
+            id: "1784140001",
+            time: 1715000000,
+            messaging: [
+              {
+                sender: { id: "igsid_123" },
+                recipient: { id: "1784140001" },
+                message: { mid: "m_1", text: "Webhook message" },
+              },
+            ],
+          },
+        ],
+      });
+
+      // Missing signature header -> 401
+      const noSigReq = new Request("https://example.com/webhooks/instagram", {
+        method: "POST",
+        body: payload,
+      });
+      const noSigRes = await worker.fetch(noSigReq, baseEnv);
+      expect(noSigRes.status).toBe(401);
+
+      // Wrong signature -> 401
+      const wrongSigReq = new Request("https://example.com/webhooks/instagram", {
+        method: "POST",
+        headers: { "x-hub-signature-256": "sha256=invalid_hex_string" },
+        body: payload,
+      });
+      const wrongSigRes = await worker.fetch(wrongSigReq, baseEnv);
+      expect(wrongSigRes.status).toBe(401);
+
+      // Missing app secret in env -> 401
+      const noSecretEnv: WorkerEnv = { ...baseEnv, META_APP_SECRET: undefined };
+      const noSecretReq = new Request("https://example.com/webhooks/instagram", {
+        method: "POST",
+        headers: { "x-hub-signature-256": "sha256=abcdef" },
+        body: payload,
+      });
+      const noSecretRes = await worker.fetch(noSecretReq, noSecretEnv);
+      expect(noSecretRes.status).toBe(401);
+
+      // Valid signature -> 200 with normalized events and deduplication info
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(baseEnv.META_APP_SECRET!),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+      const signatureBuf = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+      const validHex = Array.from(new Uint8Array(signatureBuf))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+      const validReq = new Request("https://example.com/webhooks/instagram", {
+        method: "POST",
+        headers: { "x-hub-signature-256": `sha256=${validHex}` },
+        body: payload,
+      });
+      const validRes = await worker.fetch(validReq, baseEnv);
+      expect(validRes.status).toBe(200);
+      const resBody = (await validRes.json()) as { status: string; received_events_count: number; dispatched: number };
+      expect(resBody.status).toBe("ok");
+      expect(resBody.received_events_count).toBe(1);
+      expect(resBody.dispatched).toBe(1);
+    });
   });
 
   it("returns 404 for unknown endpoints", async () => {

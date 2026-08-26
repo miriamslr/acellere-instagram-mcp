@@ -4,7 +4,11 @@ import { AcellereMetaClient, type AcellereWriteMode, type InstagramApiMode } fro
 import { registerAll } from "./register-all.js";
 import { createMcpLogger } from "./utils/logger.js";
 import type { MetaConfig } from "./config.js";
-import { normalizeInstagramWebhook, verifyWebhookSignature } from "./services/webhook-normalizer.js";
+import {
+  normalizeInstagramWebhook,
+  verifyWebhookSignature,
+  DefaultWebhookEventSink,
+} from "./services/webhook-normalizer.js";
 
 export const SERVER_VERSION = "8.0.0";
 
@@ -21,6 +25,7 @@ export const SERVER_INSTRUCTIONS = [
 
 export interface WorkerEnv {
   AUTH_TOKEN?: string;
+  INSTAGRAM_WEBHOOK_VERIFY_TOKEN?: string;
   INSTAGRAM_ACCESS_TOKEN?: string;
   INSTAGRAM_USER_ID?: string;
   FACEBOOK_PAGE_ID?: string;
@@ -33,6 +38,8 @@ export interface WorkerEnv {
   THREADS_ACCESS_TOKEN?: string;
   THREADS_USER_ID?: string;
 }
+
+const defaultWebhookSink = new DefaultWebhookEventSink();
 
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -138,12 +145,9 @@ export default {
         const token = url.searchParams.get("hub.verify_token");
         const challenge = url.searchParams.get("hub.challenge");
 
-        // Verify token matches AUTH_TOKEN or verify_token if provided
-        const expectedToken = env.AUTH_TOKEN?.trim();
-        if (mode === "subscribe" && challenge) {
-          if (!expectedToken || token === expectedToken) {
-            return new Response(challenge, { status: 200, headers: CORS_HEADERS });
-          }
+        const expectedVerifyToken = env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN?.trim();
+        if (mode === "subscribe" && challenge && expectedVerifyToken && token === expectedVerifyToken) {
+          return new Response(challenge, { status: 200, headers: CORS_HEADERS });
         }
         return new Response("Forbidden", { status: 403, headers: CORS_HEADERS });
       }
@@ -152,21 +156,34 @@ export default {
         const rawBody = await request.text();
         const signature = request.headers.get("x-hub-signature-256");
 
-        if (env.META_APP_SECRET) {
-          const isValid = await verifyWebhookSignature(rawBody, signature, env.META_APP_SECRET);
-          if (!isValid) {
-            return new Response(
-              JSON.stringify({ error: "Invalid HMAC signature" }),
-              { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-            );
-          }
+        // Fail-closed: require configured META_APP_SECRET and presence of X-Hub-Signature-256
+        if (!env.META_APP_SECRET || !signature) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Webhook receiver requires configured META_APP_SECRET and X-Hub-Signature-256 header." }),
+            { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+          );
+        }
+
+        const isValid = await verifyWebhookSignature(rawBody, signature, env.META_APP_SECRET);
+        if (!isValid) {
+          return new Response(
+            JSON.stringify({ error: "Unauthorized: Invalid HMAC-SHA256 signature." }),
+            { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+          );
         }
 
         try {
           const parsed = JSON.parse(rawBody);
           const normalized = normalizeInstagramWebhook(parsed);
+          const dispatchResult = await defaultWebhookSink.dispatch(normalized);
           return new Response(
-            JSON.stringify({ status: "ok", received_events_count: normalized.length, events: normalized }),
+            JSON.stringify({
+              status: "ok",
+              received_events_count: normalized.length,
+              dispatched: dispatchResult.dispatched,
+              ignored_duplicates: dispatchResult.ignoredDuplicates,
+              events: normalized,
+            }),
             { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
           );
         } catch {

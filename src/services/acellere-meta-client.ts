@@ -148,8 +148,22 @@ export class AcellereMetaClient extends MetaClient {
 
   override async igExchangeToken(shortToken: string): Promise<ClientResponse> {
     if (this.instagramApiMode === "facebook-login") {
-      throw new Error(
-        "Instagram token exchange via graph.instagram.com is only available with INSTAGRAM_API_MODE=instagram-login. Use the Facebook Login long-lived user/page token flow instead."
+      const internals = this as unknown as MetaClientInternals;
+      if (!internals.config.appId || !internals.config.appSecret) {
+        throw new Error("META_APP_ID and META_APP_SECRET are required for Facebook token exchange.");
+      }
+      return internals.request.call(
+        this,
+        internals.fbBase,
+        "",
+        "GET",
+        "/oauth/access_token",
+        {
+          grant_type: "fb_exchange_token",
+          client_id: internals.config.appId,
+          client_secret: internals.config.appSecret,
+          fb_exchange_token: shortToken,
+        }
       );
     }
     return super.igExchangeToken(shortToken);

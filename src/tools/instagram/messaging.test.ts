@@ -507,17 +507,73 @@ describe("ig_get_conversations mode-aware routing with AcellereMetaClient", () =
       recipient_id: "user_456",
       text: "Choose an option:",
       quick_replies: [
-        { title: "Pricing", payload: "PAYLOAD_PRICING" },
-        { title: "Support", payload: "PAYLOAD_SUPPORT" },
+        { content_type: "text", title: "Pricing", payload: "PAYLOAD_PRICING" },
+        { content_type: "user_phone_number" },
+        { content_type: "user_email" },
       ],
     });
 
     const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call[3].jsonBody.message.quick_replies).toHaveLength(2);
-    expect(call[3].jsonBody.message.quick_replies[0].title).toBe("Pricing");
+    expect(call[3].jsonBody.message.quick_replies).toHaveLength(3);
+    expect(call[3].jsonBody.message.quick_replies[0]).toEqual({
+      content_type: "text",
+      title: "Pricing",
+      payload: "PAYLOAD_PRICING",
+    });
+    expect(call[3].jsonBody.message.quick_replies[1]).toEqual({
+      content_type: "user_phone_number",
+    });
+    expect(call[3].jsonBody.message.quick_replies[2]).toEqual({
+      content_type: "user_email",
+    });
   });
 
-  it("ig_send_reaction and ig_delete_reaction dispatch reaction payloads", async () => {
+  it("ig_send_sticker sends like_heart attachment", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient();
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_sticker", {
+      recipient_id: "user_456",
+      sticker_type: "like_heart",
+    });
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      message: {
+        attachment: {
+          type: "like_heart",
+        },
+      },
+    });
+  });
+
+  it("ig_send_published_post sends MEDIA_SHARE attachment", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient();
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_published_post", {
+      recipient_id: "user_456",
+      media_id: "17891234567890",
+    });
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      message: {
+        attachment: {
+          type: "MEDIA_SHARE",
+          payload: {
+            id: "17891234567890",
+          },
+        },
+      },
+    });
+  });
+
+  it("ig_send_reaction and ig_delete_reaction dispatch official Meta reaction payloads", async () => {
     const server = makeMockServer();
     const client = makeMockClient({
       ig: vi.fn(async () => ({
@@ -530,12 +586,18 @@ describe("ig_get_conversations mode-aware routing with AcellereMetaClient", () =
     await server.callTool("ig_send_reaction", {
       recipient_id: "user_456",
       message_id: "mid_999",
-      reaction: "❤️",
+      reaction: "love",
     });
 
     const reactCall = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(reactCall[3].jsonBody.sender_action).toBe("react");
-    expect(reactCall[3].jsonBody.reaction.reaction).toBe("❤️");
+    expect(reactCall[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      sender_action: "react",
+      payload: {
+        message_id: "mid_999",
+        reaction: "love",
+      },
+    });
 
     await server.callTool("ig_delete_reaction", {
       recipient_id: "user_456",
@@ -543,8 +605,13 @@ describe("ig_get_conversations mode-aware routing with AcellereMetaClient", () =
     });
 
     const unreactCall = (client.ig as ReturnType<typeof vi.fn>).mock.calls[1];
-    expect(unreactCall[3].jsonBody.sender_action).toBe("unreact");
-    expect(unreactCall[3].jsonBody.reaction.message_id).toBe("mid_999");
+    expect(unreactCall[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      sender_action: "unreact",
+      payload: {
+        message_id: "mid_999",
+      },
+    });
   });
 
   it("ig_upload_attachment sends attachment registration", async () => {

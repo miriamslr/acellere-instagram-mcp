@@ -145,12 +145,15 @@ describe("MCP tool annotations", () => {
       "ig_publish_carousel",
       "ig_publish_reel",
       "ig_publish_story",
+      "ig_create_resumable_upload_session",
       "ig_post_comment",
       "ig_reply_to_comment",
       "ig_send_private_reply",
       "ig_reply_to_mention",
       "ig_send_message",
       "ig_send_media_message",
+      "ig_send_sticker",
+      "ig_send_published_post",
       "ig_send_quick_replies",
       "ig_send_generic_template",
       "ig_send_button_template",
@@ -203,7 +206,7 @@ describe("MCP tool annotations", () => {
     });
   });
 
-  it("covers all 115 registered tools across the four categories", () => {
-    expect(server.tools.size).toBe(115);
+  it("covers all 118 registered tools across the four categories", () => {
+    expect(server.tools.size).toBe(118);
   });
 });

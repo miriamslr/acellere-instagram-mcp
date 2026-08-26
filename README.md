@@ -160,7 +160,7 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_get_connection_info` | Inspect sanitized connection status and user ID without exposing tokens |
 | `ig_bootstrap_discovery` | Discovers connected Facebook Pages and Instagram Business accounts (`/me/accounts` or `/me`) |
 
-### Instagram — Publishing & Limits (7)
+### Instagram — Publishing & Limits (8)
 
 | Tool | Description |
 |------|-------------|
@@ -171,6 +171,7 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_publish_story` | Publish a Story (24hr) |
 | `ig_get_container_status` | Check media container processing status |
 | `ig_get_content_publishing_limit` | Check remaining 24-hour publishing quota and rolling window rate limits |
+| `ig_create_resumable_upload_session` | Create resumable upload session container for large video files via `upload_type=resumable` |
 
 ### Instagram — Media, Stories & Live (8)
 
@@ -247,7 +248,7 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_get_tagged_media` | Get media where the account is tagged |
 | `ig_reply_to_mention` | Post a reply comment to a mention |
 
-### Instagram — Direct Messaging & Send API (13)
+### Instagram — Direct Messaging & Send API (15)
 
 | Tool | Description |
 |------|-------------|
@@ -256,11 +257,13 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_get_message` | Get message details |
 | `ig_send_message` | Send text DM (supports `RESPONSE`, `UPDATE`, `MESSAGE_TAG` / `HUMAN_AGENT` 7-day window) |
 | `ig_send_media_message` | Send image, video, audio, or file attachment in DM |
-| `ig_send_quick_replies` | Send text prompt with interactive quick reply options |
+| `ig_send_sticker` | Send sticker attachment (e.g. `like_heart`) in DM |
+| `ig_send_published_post` | Share published media post (`MEDIA_SHARE`) in DM |
+| `ig_send_quick_replies` | Send text prompt with interactive quick reply options (`text`, `user_phone_number`, `user_email`) |
 | `ig_send_generic_template` | Send rich cards and carousel templates with CTA buttons |
 | `ig_send_button_template` | Send button template in DM |
-| `ig_send_reaction` | React to a DM with an emoji |
-| `ig_delete_reaction` | Remove emoji reaction from a message |
+| `ig_send_reaction` | React to a DM via official Meta sender action `react` (`love`, `haha`, `wow`, `sad`, `angry`, `like`, `dislike`) |
+| `ig_delete_reaction` | Remove reaction via official sender action `unreact` |
 | `ig_send_sender_action` | Emit typing indicators (`typing_on`/`typing_off`) or mark seen |
 | `ig_get_user_profile_by_igsid` | Get public profile for an Instagram-Scoped ID |
 | `ig_upload_attachment` | Upload and pre-cache reusable media attachments |

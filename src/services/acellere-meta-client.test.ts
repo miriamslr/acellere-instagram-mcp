@@ -108,16 +108,27 @@ describe("Instagram API mode routing", () => {
     );
   });
 
-  it("blocks Instagram-Login token helpers in facebook-login mode", async () => {
-    const client = new AcellereMetaClient(makeConfig(), {
-      instagramApiMode: "facebook-login",
-      writeMode: "read-only",
-      maxRetries: 0,
-    });
-
-    await expect(client.igExchangeToken("short-token")).rejects.toThrow(
-      /only available with INSTAGRAM_API_MODE=instagram-login/
+  it("executes Facebook token exchange in facebook-login mode", async () => {
+    const fetchMock = mockSuccessfulFetch();
+    const client = new AcellereMetaClient(
+      makeConfig({
+        appId: "app_123",
+        appSecret: "sec_456",
+      }),
+      {
+        instagramApiMode: "facebook-login",
+        writeMode: "read-only",
+        maxRetries: 0,
+      }
     );
+
+    await client.igExchangeToken("short-token");
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
+      /^https:\/\/graph\.facebook\.com\/v25\.0\/oauth\/access_token\?/
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("grant_type=fb_exchange_token");
+
     await expect(client.igRefreshToken("long-token")).rejects.toThrow(
       /only available with INSTAGRAM_API_MODE=instagram-login/
     );
