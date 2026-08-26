@@ -12,6 +12,7 @@ function buildServerWithAllTools() {
   const cfg: MetaConfig = {
     appId: "",
     appSecret: "",
+    facebookPageId: "",
     instagramAccessToken: "",
     instagramUserId: "",
     threadsAccessToken: "",
