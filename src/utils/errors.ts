@@ -143,7 +143,14 @@ const REMEDIATION: Partial<Record<ErrorType, string>> = {
   network: "Network error or timeout reaching the Meta API. Retry with exponential backoff; verify outbound connectivity.",
 };
 
-const SENSITIVE_PARAMS = ["access_token", "client_secret", "input_token"];
+const SENSITIVE_PARAMS = [
+  "access_token",
+  "client_secret",
+  "input_token",
+  "appsecret_proof",
+  "AUTH_TOKEN",
+  "INSTAGRAM_ACCESS_TOKEN",
+];
 
 export function sanitizeRaw(text: string): string {
   let result = text;
@@ -227,11 +234,12 @@ export function toMcpResourceError(error: unknown, label: string): McpError {
   return new McpError(ErrorCode.InternalError, message, data);
 }
 
-export function validationError(message: string): McpErrorResult {
-  const payload: ErrorPayload = {
+export function validationError(message: string, extra?: Record<string, unknown>): McpErrorResult {
+  const payload: Record<string, unknown> = {
     error: true,
     error_type: "validation",
     message,
+    ...(extra ?? {}),
   };
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],

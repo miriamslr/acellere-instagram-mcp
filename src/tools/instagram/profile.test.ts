@@ -30,7 +30,7 @@ function makeMockClient(): MetaClient {
   } as unknown as MetaClient;
 }
 
-describe("ig_business_discovery field expression syntax", () => {
+describe("ig_business_discovery field expression syntax and validation", () => {
   let server: ReturnType<typeof makeMockServer>;
   let client: ReturnType<typeof makeMockClient>;
 
@@ -40,7 +40,7 @@ describe("ig_business_discovery field expression syntax", () => {
     registerIgProfileTools(server as never, client);
   });
 
-  it("uses canonical business_discovery.username(USERNAME){fields} syntax with default fields", async () => {
+  it("uses canonical business_discovery.username(USERNAME){fields} syntax with all 10 default fields", async () => {
     const handler = server.tools.get("ig_business_discovery");
     expect(handler).toBeDefined();
     await handler!({ username: "bluebottle" });
@@ -49,11 +49,11 @@ describe("ig_business_discovery field expression syntax", () => {
     expect(call[0]).toBe("GET");
     expect(call[1]).toBe("/123");
     expect(call[2]).toEqual({
-      fields: "business_discovery.username(bluebottle){id,username,name,biography,followers_count,follows_count,media_count}",
+      fields: "business_discovery.username(bluebottle){id,ig_id,username,name,biography,website,profile_picture_url,followers_count,follows_count,media_count}",
     });
   });
 
-  it("passes caller-provided fields through inside the canonical {fields} braces", async () => {
+  it("passes caller-provided allowed fields through inside the canonical {fields} braces", async () => {
     const handler = server.tools.get("ig_business_discovery");
     expect(handler).toBeDefined();
     await handler!({ username: "bluebottle", fields: "id,username,followers_count" });
@@ -66,6 +66,25 @@ describe("ig_business_discovery field expression syntax", () => {
     });
   });
 
+  it("blocks unsupported fields before calling Meta and returns a structured validation error", async () => {
+    const handler = server.tools.get("ig_business_discovery");
+    expect(handler).toBeDefined();
+    const result = (await handler!({ username: "bluebottle", fields: "id,account_type,insights" })) as {
+      isError?: boolean;
+      content: { type: string; text: string }[];
+    };
+
+    expect(result.isError).toBe(true);
+    expect(client.ig).not.toHaveBeenCalled();
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.error).toBe(true);
+    expect(payload.error_type).toBe("validation");
+    expect(payload.error_code).toBe("unsupported_fields");
+    expect(payload.unsupported_fields).toContain("account_type");
+    expect(payload.unsupported_fields).toContain("insights");
+    expect(payload.message).toContain("não está disponível para contas de terceiros");
+  });
+
   it("forwards a parsed (normalized) username to the canonical expression unchanged", async () => {
     const handler = server.tools.get("ig_business_discovery");
     expect(handler).toBeDefined();
@@ -74,7 +93,7 @@ describe("ig_business_discovery field expression syntax", () => {
 
     const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[2]).toEqual({
-      fields: "business_discovery.username(bluebottle){id,username,name,biography,followers_count,follows_count,media_count}",
+      fields: "business_discovery.username(bluebottle){id,ig_id,username,name,biography,website,profile_picture_url,followers_count,follows_count,media_count}",
     });
   });
 
