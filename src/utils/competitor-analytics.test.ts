@@ -95,6 +95,26 @@ describe("competitor-analytics utils", () => {
       }),
     ];
 
+    it("does not extrapolate posting frequency from a single post", () => {
+      const singlePost = [
+        normalizeMediaItem({
+          id: "single-1",
+          caption: "Single observed post",
+          media_type: "IMAGE",
+          like_count: 10,
+          comments_count: 1,
+          timestamp: "2026-08-25T00:35:06Z",
+        }),
+      ];
+
+      const report = analyzeCompetitorMedia(account, singlePost);
+
+      expect(report.sample.posts_analyzed).toBe(1);
+      expect(report.sample.observed_period.duration_days).toBe(0);
+      expect(report.sample.posts_per_week).toBeNull();
+      expect(report.sample.average_posting_interval_hours).toBeNull();
+    });
+
     it("computes complete deterministic analysis report", () => {
       const report = analyzeCompetitorMedia(account, media);
 

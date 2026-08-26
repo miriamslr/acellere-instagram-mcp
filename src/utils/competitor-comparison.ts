@@ -9,7 +9,7 @@ export interface CompetitorComparisonSuccessItem {
   follows_count?: number;
   media_count?: number;
   posts_analyzed: number;
-  posts_per_week: number;
+  posts_per_week: number | null;
   public_engagement_rate: {
     average: number;
     median: number;
