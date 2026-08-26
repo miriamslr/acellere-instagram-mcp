@@ -37,9 +37,38 @@ export const collaboratorsSchema = z
     message: "Collaborator usernames must be unique",
   })
   .optional()
-  .describe(
-    "Optional. Up to 3 unique Instagram usernames to invite as collaborators. Per Instagram Graph API: supported for Feed image, Reels, and Carousels — not supported for Stories. Leading '@' characters and surrounding whitespace are auto-stripped before the uniqueness check."
-  );
+export const MAX_SAFE_VIDEO_BASE64_BYTES = 8 * 1024 * 1024; // 8 MB
+
+/**
+ * Preflights and decodes a base64 video string into a Uint8Array.
+ * Enforces memory safety checks BEFORE calling atob() to avoid creating large strings in memory.
+ */
+export function decodeVideoBase64Preflight(base64Str: string): Uint8Array {
+  const cleanLength = base64Str.trim().length;
+  const padding = base64Str.endsWith("==") ? 2 : base64Str.endsWith("=") ? 1 : 0;
+  const estimatedBytes = Math.max(0, Math.floor((cleanLength * 3) / 4) - padding);
+
+  if (estimatedBytes > MAX_SAFE_VIDEO_BASE64_BYTES) {
+    throw new Error(
+      `Base64 video payload exceeds maximum safe memory limit (8 MB, estimated ${(estimatedBytes / (1024 * 1024)).toFixed(2)} MB). ` +
+      `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
+    );
+  }
+
+  const binaryStr = atob(base64Str);
+  if (binaryStr.length > MAX_SAFE_VIDEO_BASE64_BYTES) {
+    throw new Error(
+      `Base64 video payload exceeds maximum safe memory limit (8 MB, got ${(binaryStr.length / (1024 * 1024)).toFixed(2)} MB). ` +
+      `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
+    );
+  }
+
+  const buffer = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    buffer[i] = binaryStr.charCodeAt(i);
+  }
+  return buffer;
+}
 
 export function registerIgPublishingTools(server: McpServer, client: MetaClient): void {
   // ─── ig_publish_photo ────────────────────────────────────────
@@ -427,18 +456,22 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
     {
       description:
         "Transfer raw video binary data to rupload.facebook.com upload URI for an existing resumable session. " +
-        "Accepts a public HTTPS video_url to stream from or base64-encoded video_data. Write.",
+        "Accepts a public HTTPS video_url to stream from or base64-encoded video_data with offset support. Write.",
       inputSchema: {
         upload_uri: z.string().url().describe("The rupload.facebook.com URI returned from session creation"),
         video_url: httpsUrl.optional().describe("Public HTTPS URL of the video file to download and stream to Meta"),
         video_base64: z.string().optional().describe("Base64-encoded raw video binary bytes"),
-        offset: z.number().optional().default(0).describe("Byte offset to start upload (default: 0)"),
+        offset: z.number().int().min(0).optional().default(0).describe("Byte offset to start upload (must be integer >= 0, default: 0)"),
       },
       annotations: WRITE_TOOL,
     },
-    async ({ upload_uri, video_url, video_base64, offset }) => {
+    async ({ upload_uri, video_url, video_base64, offset = 0 }) => {
       try {
         client.requireInstagramCapability("publishing.resumableUpload");
+
+        if (!Number.isInteger(offset) || offset < 0) {
+          return formatErrorResponse(new Error(`offset must be an integer >= 0 (got ${offset})`), "Upload resumable binary");
+        }
 
         if (!video_url && !video_base64) {
           return formatErrorResponse(new Error("Either video_url or video_base64 must be provided"), "Upload resumable binary");
@@ -448,49 +481,103 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
         let fileSize: number;
 
         if (video_url) {
-          const fetchHeaders: Record<string, string> = {};
-          if (offset > 0) {
-            fetchHeaders["Range"] = `bytes=${offset}-`;
-          }
-          const sourceRes = await fetch(video_url, { headers: fetchHeaders });
-          if (!sourceRes.ok && sourceRes.status !== 206) {
-            throw new Error(`Failed to fetch source video from ${video_url}: HTTP ${sourceRes.status}`);
-          }
+          if (offset === 0) {
+            const sourceRes = await fetch(video_url);
+            if (!sourceRes.ok && sourceRes.status !== 206) {
+              throw new Error(`Failed to fetch source video from ${video_url}: HTTP ${sourceRes.status}`);
+            }
 
-          if (offset > 0 && sourceRes.headers.get("content-range")) {
-            const range = sourceRes.headers.get("content-range")!;
-            const match = range.match(/\/(\d+)$/);
-            if (match) {
-              fileSize = Number(match[1]);
+            if (sourceRes.status === 206 && sourceRes.headers.get("content-range")) {
+              const range = sourceRes.headers.get("content-range")!;
+              const match = range.trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+)$/i);
+              if (match) {
+                fileSize = Number(match[3]);
+              } else {
+                const cl = sourceRes.headers.get("content-length");
+                if (!cl) throw new Error(`Source video at ${video_url} did not provide a Content-Length or Content-Range header.`);
+                fileSize = Number(cl);
+              }
             } else {
-              fileSize = offset + Number(sourceRes.headers.get("content-length") ?? 0);
+              const cl = sourceRes.headers.get("content-length");
+              if (!cl) {
+                throw new Error(`Source video at ${video_url} did not provide a Content-Length header.`);
+              }
+              fileSize = Number(cl);
             }
-          } else {
-            const cl = sourceRes.headers.get("content-length");
-            if (!cl) {
-              throw new Error(`Source video at ${video_url} did not provide a Content-Length header.`);
-            }
-            fileSize = Number(cl);
-          }
 
-          if (!sourceRes.body) {
-            throw new Error(`Source video at ${video_url} returned an empty body.`);
+            if (!sourceRes.body) {
+              throw new Error(`Source video at ${video_url} returned an empty body.`);
+            }
+            body = sourceRes.body as unknown as BodyInit;
+          } else {
+            const sourceRes = await fetch(video_url, {
+              headers: { Range: `bytes=${offset}-` },
+            });
+
+            if (sourceRes.status === 200) {
+              throw new Error(
+                `Failed to resume video upload: origin server at ${video_url} ignored Range header and returned HTTP 200 instead of HTTP 206 Partial Content.`
+              );
+            }
+
+            if (sourceRes.status !== 206) {
+              throw new Error(
+                `Failed to fetch video chunk from ${video_url}: expected HTTP 206 Partial Content, got HTTP ${sourceRes.status}.`
+              );
+            }
+
+            const contentRange = sourceRes.headers.get("content-range");
+            if (!contentRange) {
+              throw new Error(`Origin server at ${video_url} returned HTTP 206 without a Content-Range header.`);
+            }
+
+            const match = contentRange.trim().match(/^bytes\s+(\d+)-(\d+)\/(\d+)$/i);
+            if (!match) {
+              throw new Error(
+                `Invalid Content-Range header format: "${contentRange}". Expected "bytes START-END/TOTAL".`
+              );
+            }
+
+            const rangeStart = Number(match[1]);
+            const rangeEnd = Number(match[2]);
+            const totalSize = Number(match[3]);
+
+            if (rangeStart !== offset) {
+              throw new Error(
+                `Content-Range start (${rangeStart}) does not match requested offset (${offset}).`
+              );
+            }
+
+            if (rangeEnd < rangeStart) {
+              throw new Error(
+                `Invalid Content-Range: end (${rangeEnd}) is less than start (${rangeStart}).`
+              );
+            }
+
+            if (totalSize <= 0 || !Number.isInteger(totalSize)) {
+              throw new Error(`Invalid Content-Range total file size: ${match[3]}.`);
+            }
+
+            fileSize = totalSize;
+
+            if (!sourceRes.body) {
+              throw new Error(`Source video at ${video_url} returned an empty body.`);
+            }
+            body = sourceRes.body as unknown as BodyInit;
           }
-          body = sourceRes.body as unknown as BodyInit;
         } else {
-          const binaryStr = atob(video_base64!);
-          if (binaryStr.length > 8 * 1024 * 1024) {
+          const buffer = decodeVideoBase64Preflight(video_base64!);
+          const totalFileSize = buffer.byteLength;
+
+          if (offset > totalFileSize) {
             throw new Error(
-              `Base64 video payload exceeds maximum safe memory limit (8 MB, got ${(binaryStr.length / (1024 * 1024)).toFixed(2)} MB). ` +
-              `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
+              `Offset (${offset}) exceeds total video file size (${totalFileSize} bytes).`
             );
           }
-          const buffer = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            buffer[i] = binaryStr.charCodeAt(i);
-          }
-          fileSize = buffer.byteLength;
-          body = buffer as unknown as BodyInit;
+
+          const chunk = offset > 0 ? buffer.subarray(offset) : buffer;
+          fileSize = totalFileSize;
+          body = chunk as unknown as BodyInit;
         }
 
         const result = await client.uploadResumableBinary({
@@ -578,17 +665,7 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
           }
           body = sourceRes.body as unknown as BodyInit;
         } else {
-          const binaryStr = atob(video_base64!);
-          if (binaryStr.length > 8 * 1024 * 1024) {
-            throw new Error(
-              `Base64 video payload exceeds maximum safe memory limit (8 MB, got ${(binaryStr.length / (1024 * 1024)).toFixed(2)} MB). ` +
-              `For larger videos, provide a public HTTPS video_url for memory-efficient streaming.`
-            );
-          }
-          const buffer = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            buffer[i] = binaryStr.charCodeAt(i);
-          }
+          const buffer = decodeVideoBase64Preflight(video_base64!);
           fileSize = buffer.byteLength;
           body = buffer as unknown as BodyInit;
         }

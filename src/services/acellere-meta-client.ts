@@ -68,7 +68,7 @@ function parseAllowDestructive(explicit?: boolean): boolean {
 
 function parseInstagramApiMode(explicit?: InstagramApiMode): InstagramApiMode {
   if (explicit) return explicit;
-  const raw = (process.env.INSTAGRAM_API_MODE ?? "instagram-login").trim().toLowerCase();
+  const raw = (process.env.INSTAGRAM_API_MODE ?? "facebook-login").trim().toLowerCase();
   if (raw === "instagram-login" || raw === "facebook-login") return raw;
   throw new Error(
     `INSTAGRAM_API_MODE must be "instagram-login" or "facebook-login" (got "${raw}").`

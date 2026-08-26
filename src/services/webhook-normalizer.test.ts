@@ -6,6 +6,9 @@ import {
   KVEventDeduplicator,
   isTimestampWithinReplayWindow,
   DefaultWebhookEventSink,
+  InMemoryWebhookDeduplicatorCoordinator,
+  CloudflareQueueWebhookEventSink,
+  sanitizeWebhookEvent,
   type CloudflareKVLike,
 } from "./webhook-normalizer.js";
 
@@ -341,4 +344,116 @@ describe("Instagram Webhook Normalizer", () => {
     const isInvalid = await verifyWebhookSignature(body, "sha256=wrong_signature", secret);
     expect(isInvalid).toBe(false);
   });
+
+  describe("CloudflareQueueWebhookEventSink & Secret Sanitization", () => {
+    it("sanitizes all Meta secrets and credentials from webhook event payloads", () => {
+      const sensitiveEvent = {
+        id: "evt_secret_test",
+        eventType: "message_received" as const,
+        timestamp: Date.now(),
+        recipientId: "123",
+        payload: {
+          text: "Safe text message",
+          access_token: "leaked_token_123",
+          INSTAGRAM_ACCESS_TOKEN: "leaked_ig_token",
+          META_APP_SECRET: "leaked_secret",
+          nested: {
+            auth_token: "nested_auth",
+            client_secret: "secret_123",
+            safeKey: "safeValue",
+          },
+        },
+        raw: {
+          Authorization: "Bearer xyz",
+          appsecret_proof: "proof_123",
+          message: "hello",
+        },
+      };
+
+      const sanitized = sanitizeWebhookEvent(sensitiveEvent);
+      expect(sanitized.payload).not.toHaveProperty("access_token");
+      expect(sanitized.payload).not.toHaveProperty("INSTAGRAM_ACCESS_TOKEN");
+      expect(sanitized.payload).not.toHaveProperty("META_APP_SECRET");
+      expect(sanitized.payload).toEqual({
+        text: "Safe text message",
+        nested: {
+          safeKey: "safeValue",
+        },
+      });
+      expect(sanitized.raw).toEqual({
+        message: "hello",
+      });
+    });
+
+    it("enqueues new events to Cloudflare Queue, marks delivered in coordinator, and deduplicates subsequent events", async () => {
+      const queuedMessages: unknown[] = [];
+      const mockQueue = {
+        send: vi.fn(async (msg: unknown) => {
+          queuedMessages.push(msg);
+        }),
+      };
+
+      const coordinator = new InMemoryWebhookDeduplicatorCoordinator();
+      const sink = new CloudflareQueueWebhookEventSink(mockQueue, coordinator);
+
+      const event = {
+        id: "queue_event_100",
+        eventType: "message_received" as const,
+        timestamp: Date.now(),
+        recipientId: "recip_123",
+        payload: { text: "Queue payload", access_token: "leak" },
+        raw: {},
+      };
+
+      // First dispatch -> enqueues
+      const res1 = await sink.dispatch([event]);
+      expect(res1.dispatched).toBe(1);
+      expect(res1.ignoredDuplicates).toBe(0);
+      expect(mockQueue.send).toHaveBeenCalledTimes(1);
+      expect(queuedMessages[0]).toMatchObject({
+        id: "queue_event_100",
+        payload: { text: "Queue payload" },
+      });
+      expect(queuedMessages[0]).not.toHaveProperty("payload.access_token");
+
+      // Second dispatch with same event ID -> duplicate, queue not called again
+      const res2 = await sink.dispatch([event]);
+      expect(res2.dispatched).toBe(0);
+      expect(res2.ignoredDuplicates).toBe(1);
+      expect(mockQueue.send).toHaveBeenCalledTimes(1);
+    });
+
+    it("releases pending state if queue enqueue fails so that retry can succeed", async () => {
+      let failQueue = true;
+      const mockQueue = {
+        send: vi.fn(async () => {
+          if (failQueue) {
+            throw new Error("Temporary Queue Network Outage");
+          }
+        }),
+      };
+
+      const coordinator = new InMemoryWebhookDeduplicatorCoordinator();
+      const sink = new CloudflareQueueWebhookEventSink(mockQueue, coordinator);
+
+      const event = {
+        id: "queue_retry_event",
+        eventType: "message_received" as const,
+        timestamp: Date.now(),
+        recipientId: "recip_123",
+        payload: { text: "Retry message" },
+        raw: {},
+      };
+
+      // First dispatch fails
+      await expect(sink.dispatch([event])).rejects.toThrow("Temporary Queue Network Outage");
+
+      // Queue recovers: retry should succeed immediately (not blocked as duplicate)
+      failQueue = false;
+      const resRetry = await sink.dispatch([event]);
+      expect(resRetry.dispatched).toBe(1);
+      expect(resRetry.ignoredDuplicates).toBe(0);
+    });
+  });
 });
+

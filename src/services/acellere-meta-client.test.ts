@@ -134,6 +134,19 @@ describe("Instagram API mode routing", () => {
     );
   });
 
+  it("defaults to facebook-login when INSTAGRAM_API_MODE is omitted", () => {
+    const previous = process.env.INSTAGRAM_API_MODE;
+    delete process.env.INSTAGRAM_API_MODE;
+    try {
+      const client = new AcellereMetaClient(makeConfig(), {
+        writeMode: "read-only",
+      });
+      expect(client.getInstagramApiMode()).toBe("facebook-login");
+    } finally {
+      if (previous !== undefined) process.env.INSTAGRAM_API_MODE = previous;
+    }
+  });
+
   it("rejects an invalid INSTAGRAM_API_MODE", () => {
     const previous = process.env.INSTAGRAM_API_MODE;
     process.env.INSTAGRAM_API_MODE = "invalid";

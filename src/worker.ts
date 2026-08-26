@@ -7,11 +7,17 @@ import type { MetaConfig } from "./config.js";
 import {
   normalizeInstagramWebhook,
   verifyWebhookSignature,
-  DefaultWebhookEventSink,
+  InMemoryWebhookEventSink,
+  CloudflareQueueWebhookEventSink,
+  DODeduplicatorCoordinator,
   InMemoryEventDeduplicator,
   KVEventDeduplicator,
   type CloudflareKVLike,
+  type CloudflareQueueLike,
 } from "./services/webhook-normalizer.js";
+import { InstagramWebhookDeduplicatorDO } from "./services/webhook-deduplicator-do.js";
+
+export { InstagramWebhookDeduplicatorDO };
 
 export const SERVER_VERSION = "8.0.0";
 
@@ -42,6 +48,11 @@ export interface WorkerEnv {
   THREADS_USER_ID?: string;
   KV_DEDUPLICATION?: CloudflareKVLike;
   CACHE_KV?: CloudflareKVLike;
+  WEBHOOK_QUEUE?: CloudflareQueueLike;
+  WEBHOOK_DEDUPLICATOR_DO?: {
+    idFromName(name: string): unknown;
+    get(id: unknown): { fetch(request: Request): Promise<Response> };
+  };
 }
 
 const defaultWebhookDeduplicator = new InMemoryEventDeduplicator();
@@ -171,14 +182,31 @@ export default {
           );
         }
 
+        let parsed: unknown;
         try {
-          const parsed = JSON.parse(rawBody);
+          parsed = JSON.parse(rawBody);
+        } catch {
+          return new Response(
+            JSON.stringify({ error: "Invalid JSON payload" }),
+            { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+          );
+        }
+
+        try {
           const normalized = normalizeInstagramWebhook(parsed);
+
+          let coordinator: DODeduplicatorCoordinator | undefined;
+          if (env.WEBHOOK_DEDUPLICATOR_DO) {
+            coordinator = new DODeduplicatorCoordinator(env.WEBHOOK_DEDUPLICATOR_DO);
+          }
+
           const kv = env.KV_DEDUPLICATION ?? env.CACHE_KV;
-          const deduplicator = kv
-            ? new KVEventDeduplicator(kv)
-            : defaultWebhookDeduplicator;
-          const sink = new DefaultWebhookEventSink(deduplicator);
+          const fallbackDedup = kv ? new KVEventDeduplicator(kv) : defaultWebhookDeduplicator;
+
+          const sink = env.WEBHOOK_QUEUE
+            ? new CloudflareQueueWebhookEventSink(env.WEBHOOK_QUEUE, coordinator)
+            : new InMemoryWebhookEventSink(coordinator ?? fallbackDedup);
+
           const dispatchResult = await sink.dispatch(normalized);
 
           return new Response(
@@ -192,10 +220,14 @@ export default {
             }),
             { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
           );
-        } catch {
+        } catch (dispatchError: unknown) {
+          const message = dispatchError instanceof Error ? dispatchError.message : "Webhook event dispatch failed";
           return new Response(
-            JSON.stringify({ error: "Invalid JSON payload" }),
-            { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+            JSON.stringify({
+              error: "Webhook event dispatch failed, retry requested",
+              message,
+            }),
+            { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
           );
         }
       }

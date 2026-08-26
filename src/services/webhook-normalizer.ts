@@ -105,6 +105,163 @@ export class KVEventDeduplicator implements WebhookEventDeduplicator {
   }
 }
 
+export interface CloudflareQueueLike {
+  send(message: unknown): Promise<void>;
+  sendBatch?(messages: Array<{ body: unknown }>): Promise<void>;
+}
+
+export interface WebhookDeduplicatorCoordinator {
+  checkAndSet(eventId: string, ttlSeconds?: number): Promise<{ isNew: boolean; status?: string }>;
+  markDelivered(eventId: string, ttlSeconds?: number): Promise<void>;
+  releasePending(eventId: string): Promise<void>;
+}
+
+export class DODeduplicatorCoordinator implements WebhookDeduplicatorCoordinator {
+  private readonly doNamespace: {
+    idFromName(name: string): unknown;
+    get(id: unknown): { fetch(request: Request): Promise<Response> };
+  };
+  private readonly objectName: string;
+
+  constructor(
+    doNamespace: {
+      idFromName(name: string): unknown;
+      get(id: unknown): { fetch(request: Request): Promise<Response> };
+    },
+    objectName: string = "global"
+  ) {
+    this.doNamespace = doNamespace;
+    this.objectName = objectName;
+  }
+
+  private getStub() {
+    const id = this.doNamespace.idFromName(this.objectName);
+    return this.doNamespace.get(id);
+  }
+
+  public async checkAndSet(eventId: string, ttlSeconds?: number): Promise<{ isNew: boolean; status?: string }> {
+    const stub = this.getStub();
+    const res = await stub.fetch(
+      new Request("https://do-internal/check-and-set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, ttlSeconds }),
+      })
+    );
+    if (!res.ok) {
+      throw new Error(`Deduplicator DO checkAndSet failed: HTTP ${res.status}`);
+    }
+    return (await res.json()) as { isNew: boolean; status?: string };
+  }
+
+  public async markDelivered(eventId: string, ttlSeconds?: number): Promise<void> {
+    const stub = this.getStub();
+    const res = await stub.fetch(
+      new Request("https://do-internal/mark-delivered", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, ttlSeconds }),
+      })
+    );
+    if (!res.ok) {
+      throw new Error(`Deduplicator DO markDelivered failed: HTTP ${res.status}`);
+    }
+  }
+
+  public async releasePending(eventId: string): Promise<void> {
+    const stub = this.getStub();
+    const res = await stub.fetch(
+      new Request("https://do-internal/release-pending", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId }),
+      })
+    );
+    if (!res.ok) {
+      throw new Error(`Deduplicator DO releasePending failed: HTTP ${res.status}`);
+    }
+  }
+}
+
+export class InMemoryWebhookDeduplicatorCoordinator implements WebhookDeduplicatorCoordinator {
+  private readonly states = new Map<string, { status: "pending" | "delivered"; createdAt: number }>();
+  private readonly leaseMs: number;
+
+  constructor(leaseMs: number = 30000) {
+    this.leaseMs = leaseMs;
+  }
+
+  public async checkAndSet(eventId: string): Promise<{ isNew: boolean; status: string }> {
+    const existing = this.states.get(eventId);
+    const now = Date.now();
+    if (existing) {
+      if (existing.status === "delivered") {
+        return { isNew: false, status: "duplicate" };
+      }
+      if (existing.status === "pending" && now - existing.createdAt < this.leaseMs) {
+        return { isNew: false, status: "pending_in_progress" };
+      }
+    }
+    this.states.set(eventId, { status: "pending", createdAt: now });
+    return { isNew: true, status: "new" };
+  }
+
+  public async markDelivered(eventId: string): Promise<void> {
+    const existing = this.states.get(eventId);
+    this.states.set(eventId, { status: "delivered", createdAt: existing?.createdAt ?? Date.now() });
+  }
+
+  public async releasePending(eventId: string): Promise<void> {
+    this.states.delete(eventId);
+  }
+
+  public clear(): void {
+    this.states.clear();
+  }
+}
+
+export function isSensitiveWebhookKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return (
+    lower === "access_token" ||
+    lower === "auth_token" ||
+    lower === "instagram_access_token" ||
+    lower === "meta_app_secret" ||
+    lower === "instagram_webhook_verify_token" ||
+    lower === "authorization" ||
+    lower === "appsecret_proof" ||
+    lower === "client_secret"
+  );
+}
+
+export function sanitizeWebhookObject<T>(obj: T): T {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeWebhookObject(item)) as unknown as T;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (isSensitiveWebhookKey(k)) continue;
+    result[k] = sanitizeWebhookObject(v);
+  }
+  return result as T;
+}
+
+/**
+ * Sanitizes a normalized webhook event to guarantee zero credential or token leakage.
+ */
+export function sanitizeWebhookEvent(event: NormalizedWebhookEvent): NormalizedWebhookEvent {
+  return {
+    id: event.id,
+    eventType: event.eventType,
+    timestamp: event.timestamp,
+    recipientId: event.recipientId,
+    senderId: event.senderId,
+    payload: sanitizeWebhookObject(event.payload),
+    raw: sanitizeWebhookObject(event.raw),
+  };
+}
+
 export interface InstagramWebhookEventSink {
   dispatch(events: NormalizedWebhookEvent[]): Promise<WebhookDispatchResult>;
 }
@@ -123,16 +280,22 @@ export function isTimestampWithinReplayWindow(
   return true;
 }
 
-export class DefaultWebhookEventSink implements InstagramWebhookEventSink {
-  private readonly deduplicator: WebhookEventDeduplicator;
+/**
+ * Production Webhook Event Sink dispatching normalized events into Cloudflare Queues with atomic DO deduplication.
+ */
+export class CloudflareQueueWebhookEventSink implements InstagramWebhookEventSink {
+  private readonly queue: CloudflareQueueLike;
+  private readonly coordinator?: WebhookDeduplicatorCoordinator;
   private readonly maxAgeMs: number;
   private readonly maxFutureSkewMs: number;
 
   constructor(
-    deduplicator?: WebhookEventDeduplicator,
+    queue: CloudflareQueueLike,
+    coordinator?: WebhookDeduplicatorCoordinator,
     options?: { maxAgeMs?: number; maxFutureSkewMs?: number }
   ) {
-    this.deduplicator = deduplicator ?? new InMemoryEventDeduplicator();
+    this.queue = queue;
+    this.coordinator = coordinator;
     this.maxAgeMs = options?.maxAgeMs ?? 24 * 3600 * 1000;
     this.maxFutureSkewMs = options?.maxFutureSkewMs ?? 5 * 60 * 1000;
   }
@@ -141,7 +304,6 @@ export class DefaultWebhookEventSink implements InstagramWebhookEventSink {
     let dispatched = 0;
     let ignoredDuplicates = 0;
     let ignoredReplays = 0;
-
     const now = Date.now();
 
     for (const event of events) {
@@ -151,18 +313,104 @@ export class DefaultWebhookEventSink implements InstagramWebhookEventSink {
         continue;
       }
 
-      const isDup = await this.deduplicator.isDuplicate(event.id, now);
-      if (isDup) {
-        ignoredDuplicates++;
-        continue;
-      }
+      if (this.coordinator) {
+        const check = await this.coordinator.checkAndSet(event.id);
+        if (!check.isNew) {
+          ignoredDuplicates++;
+          continue;
+        }
 
-      dispatched++;
+        const sanitized = sanitizeWebhookEvent(event);
+        try {
+          await this.queue.send(sanitized);
+          await this.coordinator.markDelivered(event.id);
+          dispatched++;
+        } catch (enqueueError) {
+          // Release pending lock so Meta's retry can succeed!
+          await this.coordinator.releasePending(event.id).catch(() => {});
+          throw enqueueError;
+        }
+      } else {
+        const sanitized = sanitizeWebhookEvent(event);
+        await this.queue.send(sanitized);
+        dispatched++;
+      }
     }
 
     return { dispatched, ignoredDuplicates, ignoredReplays };
   }
 }
+
+/**
+ * In-memory sink for local development and testing.
+ */
+export class InMemoryWebhookEventSink implements InstagramWebhookEventSink {
+  public readonly dispatchedEvents: NormalizedWebhookEvent[] = [];
+  private readonly coordinator?: WebhookDeduplicatorCoordinator;
+  private readonly deduplicator?: WebhookEventDeduplicator;
+  private readonly maxAgeMs: number;
+  private readonly maxFutureSkewMs: number;
+
+  constructor(
+    deduplicatorOrCoordinator?: WebhookEventDeduplicator | WebhookDeduplicatorCoordinator,
+    options?: { maxAgeMs?: number; maxFutureSkewMs?: number }
+  ) {
+    if (deduplicatorOrCoordinator && "checkAndSet" in deduplicatorOrCoordinator) {
+      this.coordinator = deduplicatorOrCoordinator;
+    } else if (deduplicatorOrCoordinator && "isDuplicate" in deduplicatorOrCoordinator) {
+      this.deduplicator = deduplicatorOrCoordinator;
+    }
+    this.maxAgeMs = options?.maxAgeMs ?? 24 * 3600 * 1000;
+    this.maxFutureSkewMs = options?.maxFutureSkewMs ?? 5 * 60 * 1000;
+  }
+
+  public async dispatch(events: NormalizedWebhookEvent[]): Promise<WebhookDispatchResult> {
+    let dispatched = 0;
+    let ignoredDuplicates = 0;
+    let ignoredReplays = 0;
+    const now = Date.now();
+
+    for (const event of events) {
+      const eventTs = event.timestamp < 1e11 ? event.timestamp * 1000 : event.timestamp;
+      if (!isTimestampWithinReplayWindow(eventTs, now, this.maxAgeMs, this.maxFutureSkewMs)) {
+        ignoredReplays++;
+        continue;
+      }
+
+      if (this.coordinator) {
+        const check = await this.coordinator.checkAndSet(event.id);
+        if (!check.isNew) {
+          ignoredDuplicates++;
+          continue;
+        }
+        const sanitized = sanitizeWebhookEvent(event);
+        this.dispatchedEvents.push(sanitized);
+        await this.coordinator.markDelivered(event.id);
+        dispatched++;
+      } else if (this.deduplicator) {
+        const isDup = await this.deduplicator.isDuplicate(event.id, now);
+        if (isDup) {
+          ignoredDuplicates++;
+          continue;
+        }
+        const sanitized = sanitizeWebhookEvent(event);
+        this.dispatchedEvents.push(sanitized);
+        dispatched++;
+      } else {
+        const sanitized = sanitizeWebhookEvent(event);
+        this.dispatchedEvents.push(sanitized);
+        dispatched++;
+      }
+    }
+
+    return { dispatched, ignoredDuplicates, ignoredReplays };
+  }
+}
+
+/**
+ * Backward-compatible DefaultWebhookEventSink alias.
+ */
+export class DefaultWebhookEventSink extends InMemoryWebhookEventSink {}
 
 export function normalizeInstagramWebhook(body: unknown): NormalizedWebhookEvent[] {
   if (!body || typeof body !== "object") return [];

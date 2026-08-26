@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker, { CORS_HEADERS, type WorkerEnv } from "./worker.js";
 
 const DEFAULT_MCP_HEADERS = {
@@ -308,6 +308,84 @@ describe("Cloudflare Worker (src/worker.ts)", () => {
       expect(resBody.received_events_count).toBe(1);
       expect(resBody.dispatched).toBe(1);
       expect(resBody.ignored_replays).toBe(0);
+    });
+
+    it("enqueues events to WEBHOOK_QUEUE when configured and returns 500 if queue fails", async () => {
+      const currentSeconds = Math.floor(Date.now() / 1000);
+      const payload = JSON.stringify({
+        object: "instagram",
+        entry: [
+          {
+            id: "1784140001",
+            time: currentSeconds,
+            messaging: [
+              {
+                sender: { id: "igsid_123" },
+                recipient: { id: "1784140001" },
+                timestamp: currentSeconds * 1000,
+                message: { mid: "m_queue_test", text: "Queue test" },
+              },
+            ],
+          },
+        ],
+      });
+
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(baseEnv.META_APP_SECRET!),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+      const signatureBuf = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+      const validHex = Array.from(new Uint8Array(signatureBuf))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+
+      const queued: unknown[] = [];
+      const mockQueue = {
+        send: vi.fn(async (msg: unknown) => {
+          queued.push(msg);
+        }),
+      };
+
+      const envWithQueue: WorkerEnv = {
+        ...baseEnv,
+        WEBHOOK_QUEUE: mockQueue,
+      };
+
+      const req = new Request("https://example.com/webhooks/instagram", {
+        method: "POST",
+        headers: { "x-hub-signature-256": `sha256=${validHex}` },
+        body: payload,
+      });
+
+      const res = await worker.fetch(req, envWithQueue);
+      expect(res.status).toBe(200);
+      expect(mockQueue.send).toHaveBeenCalledTimes(1);
+      expect(queued[0]).toMatchObject({ id: "m_queue_test" });
+
+      // If queue fails, returns 500 for retry
+      const failingQueue = {
+        send: vi.fn(async () => {
+          throw new Error("Queue Service Unavailable");
+        }),
+      };
+      const envWithFailingQueue: WorkerEnv = {
+        ...baseEnv,
+        WEBHOOK_QUEUE: failingQueue,
+      };
+
+      const failReq = new Request("https://example.com/webhooks/instagram", {
+        method: "POST",
+        headers: { "x-hub-signature-256": `sha256=${validHex}` },
+        body: payload,
+      });
+      const failRes = await worker.fetch(failReq, envWithFailingQueue);
+      expect(failRes.status).toBe(500);
+      const failBody = (await failRes.json()) as { error: string };
+      expect(failBody.error).toContain("Webhook event dispatch failed, retry requested");
     });
   });
 
