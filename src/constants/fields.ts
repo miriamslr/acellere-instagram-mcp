@@ -1,6 +1,41 @@
 export const IG_PROFILE_FIELDS =
   "id,name,username,biography,followers_count,follows_count,media_count,profile_picture_url,website";
 
+export const IG_BUSINESS_DISCOVERY_DEFAULT_FIELDS =
+  "id,ig_id,username,name,biography,website,profile_picture_url,followers_count,follows_count,media_count";
+
+export const IG_BUSINESS_DISCOVERY_ALLOWED_PROFILE_FIELDS = new Set([
+  "id",
+  "ig_id",
+  "username",
+  "name",
+  "biography",
+  "website",
+  "profile_picture_url",
+  "followers_count",
+  "follows_count",
+  "media_count",
+]);
+
+export const IG_BUSINESS_DISCOVERY_ALLOWED_TOP_LEVEL = new Set([
+  ...IG_BUSINESS_DISCOVERY_ALLOWED_PROFILE_FIELDS,
+  "media",
+  "stories",
+]);
+
+export const IG_BUSINESS_DISCOVERY_UNSUPPORTED_FIELDS = new Set([
+  "account_type",
+  "insights",
+  "saved_count",
+  "shares_count",
+  "comments",
+  "total_like_count",
+  "total_comments_count",
+  "total_views_count",
+  "reach",
+  "impressions",
+]);
+
 export const IG_MEDIA_FIELDS =
   "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count";
 
