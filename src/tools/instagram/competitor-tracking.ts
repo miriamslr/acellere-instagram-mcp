@@ -12,11 +12,15 @@ import {
   type CompetitorSnapshotRecord,
 } from "../../services/competitor-store.js";
 
-export function resolvePeriodDate(period?: "7d" | "30d" | "90d" | "custom", since?: string): {
+export function resolvePeriodDate(
+  period?: "7d" | "30d" | "90d" | "custom",
+  since?: string,
+  until?: string
+): {
   sinceIso?: string;
   untilIso?: string;
 } {
-  const now = new Date();
+  const now = until ? new Date(until) : new Date();
   if (period === "7d") {
     const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     return { sinceIso: d.toISOString(), untilIso: now.toISOString() };
@@ -31,7 +35,7 @@ export function resolvePeriodDate(period?: "7d" | "30d" | "90d" | "custom", sinc
   }
   return {
     sinceIso: since ? new Date(since).toISOString() : undefined,
-    untilIso: now.toISOString(),
+    untilIso: until ? new Date(until).toISOString() : new Date().toISOString(),
   };
 }
 

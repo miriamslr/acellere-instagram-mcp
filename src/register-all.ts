@@ -13,6 +13,7 @@ import { registerIgBusinessMediaTools } from "./tools/instagram/business-media.j
 import { registerIgBusinessAnalyticsTools } from "./tools/instagram/business-analytics.js";
 import { registerIgBusinessComparisonTools } from "./tools/instagram/business-comparison.js";
 import { registerIgCompetitorTrackingTools } from "./tools/instagram/competitor-tracking.js";
+import { registerIgCompetitorResearchTools } from "./tools/instagram/competitor-research.js";
 import { registerIgHashtagTools } from "./tools/instagram/hashtags.js";
 import { registerIgMentionTools } from "./tools/instagram/mentions.js";
 import { registerIgMessagingTools } from "./tools/instagram/messaging.js";
@@ -40,6 +41,7 @@ export function registerAll(server: McpServer, client: MetaClient): void {
   registerIgBusinessAnalyticsTools(server, client);
   registerIgBusinessComparisonTools(server, client);
   registerIgCompetitorTrackingTools(server, client);
+  registerIgCompetitorResearchTools(server, client);
   registerIgHashtagTools(server, client);
   registerIgMentionTools(server, client);
   registerIgMessagingTools(server, client);
