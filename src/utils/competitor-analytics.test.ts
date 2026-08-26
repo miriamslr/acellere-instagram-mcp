@@ -115,6 +115,59 @@ describe("competitor-analytics utils", () => {
       expect(report.sample.average_posting_interval_hours).toBeNull();
     });
 
+    it("does not extrapolate posting frequency from a short multi-post window", () => {
+      const shortBurst = [
+        normalizeMediaItem({
+          id: "burst-1",
+          media_type: "IMAGE",
+          timestamp: "2026-08-25T08:00:00Z",
+        }),
+        normalizeMediaItem({
+          id: "burst-2",
+          media_type: "IMAGE",
+          timestamp: "2026-08-25T16:00:00Z",
+        }),
+        normalizeMediaItem({
+          id: "burst-3",
+          media_type: "IMAGE",
+          timestamp: "2026-08-26T00:00:00Z",
+        }),
+      ];
+
+      const report = analyzeCompetitorMedia(account, shortBurst);
+
+      expect(report.sample.posts_analyzed).toBe(3);
+      expect(report.sample.observed_period.duration_days).toBe(0.67);
+      expect(report.sample.posts_per_week).toBeNull();
+      expect(report.sample.average_posting_interval_hours).toBe(8);
+    });
+
+    it("estimates weekly frequency from observed intervals after a sufficient window", () => {
+      const stableWindow = [
+        normalizeMediaItem({
+          id: "stable-1",
+          media_type: "IMAGE",
+          timestamp: "2026-08-01T00:00:00Z",
+        }),
+        normalizeMediaItem({
+          id: "stable-2",
+          media_type: "IMAGE",
+          timestamp: "2026-08-03T00:00:00Z",
+        }),
+        normalizeMediaItem({
+          id: "stable-3",
+          media_type: "IMAGE",
+          timestamp: "2026-08-05T00:00:00Z",
+        }),
+      ];
+
+      const report = analyzeCompetitorMedia(account, stableWindow);
+
+      expect(report.sample.observed_period.duration_days).toBe(4);
+      expect(report.sample.posts_per_week).toBe(3.5);
+      expect(report.sample.average_posting_interval_hours).toBe(48);
+    });
+
     it("computes complete deterministic analysis report", () => {
       const report = analyzeCompetitorMedia(account, media);
 
