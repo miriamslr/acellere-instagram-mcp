@@ -337,4 +337,37 @@ export function registerIgPublishingTools(server: McpServer, client: MetaClient)
       }
     }
   );
+
+  // ─── ig_get_content_publishing_limit ─────────────────────────
+  server.registerTool(
+    "ig_get_content_publishing_limit",
+    {
+      description:
+        "Check remaining Instagram content publishing quota and rate limit duration for the account. " +
+        "Meta limits accounts to 100 published posts per 24-hour rolling window. Read-only.",
+      inputSchema: {
+        since: z.number().optional().describe("Unix timestamp for start of rate limit period"),
+        until: z.number().optional().describe("Unix timestamp for end of rate limit period"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ since, until }) => {
+      try {
+        const params = buildParams(
+          {
+            fields: "config,quota_usage",
+          },
+          { since, until }
+        );
+        const { data, rateLimit } = await client.ig(
+          "GET",
+          `/${client.igUserId}/content_publishing_limit`,
+          params
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get content publishing limit");
+      }
+    }
+  );
 }

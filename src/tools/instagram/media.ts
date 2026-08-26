@@ -129,4 +129,84 @@ export function registerIgMediaTools(server: McpServer, client: MetaClient): voi
       }
     }
   );
+
+  // ─── ig_get_media_children ──────────────────────────────────
+  server.registerTool(
+    "ig_get_media_children",
+    {
+      description: "Get child media items belonging to a carousel/album post. Returns child media IDs, media types, URLs, and permalinks. Read-only.",
+      inputSchema: {
+        media_id: metaId.describe("Parent carousel media ID"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ media_id }) => {
+      try {
+        const { data, rateLimit } = await client.ig(
+          "GET",
+          `/${media_id}/children`,
+          { fields: "id,media_type,media_url,permalink,timestamp" }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get media children");
+      }
+    }
+  );
+
+  // ─── ig_get_stories ──────────────────────────────────────────
+  server.registerTool(
+    "ig_get_stories",
+    {
+      description: "Get active Stories published by the account in the last 24 hours. Read-only.",
+      inputSchema: {
+        limit: z.number().optional().describe("Number of stories (max 100, default 25)"),
+        after: z.string().optional().describe("Pagination cursor for next page"),
+        before: z.string().optional().describe("Pagination cursor for previous page"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ limit, after, before }) => {
+      try {
+        const params = buildParams(
+          {
+            fields: "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count",
+          },
+          { limit, after, before }
+        );
+        const { data, rateLimit } = await client.ig("GET", `/${client.igUserId}/stories`, params);
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get stories");
+      }
+    }
+  );
+
+  // ─── ig_get_live_media ───────────────────────────────────────
+  server.registerTool(
+    "ig_get_live_media",
+    {
+      description: "Get list of active live video broadcast media for the Instagram account. Read-only.",
+      inputSchema: {
+        limit: z.number().optional().describe("Number of results (max 100, default 25)"),
+        after: z.string().optional().describe("Pagination cursor for next page"),
+        before: z.string().optional().describe("Pagination cursor for previous page"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ limit, after, before }) => {
+      try {
+        const params = buildParams(
+          {
+            fields: "id,media_type,permalink,timestamp",
+          },
+          { limit, after, before }
+        );
+        const { data, rateLimit } = await client.ig("GET", `/${client.igUserId}/live_media`, params);
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get live media");
+      }
+    }
+  );
 }

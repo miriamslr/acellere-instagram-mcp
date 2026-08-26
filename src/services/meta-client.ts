@@ -1,6 +1,11 @@
 import { MetaConfig } from "../config.js";
 import { MetaApiError, MetaNetworkError, sanitizeRaw } from "../utils/errors.js";
 import { Logger, NOOP_LOGGER } from "../utils/logger.js";
+import {
+  requireInstagramCapability,
+  isCapabilitySupported,
+  type InstagramCapability,
+} from "../instagram/capabilities.js";
 
 // Default Meta Graph API and Threads API versions — last verified 2026-05-06.
 // The Graph API ships a new minor version every ~4 months and supports each
@@ -707,5 +712,17 @@ export class MetaClient {
     for (const key of this.cache.keys()) {
       if (key.startsWith(prefix)) this.cache.delete(key);
     }
+  }
+
+  getInstagramApiMode(): "instagram-login" | "facebook-login" {
+    return "instagram-login";
+  }
+
+  requireInstagramCapability(capabilityId: string): InstagramCapability {
+    return requireInstagramCapability(this.getInstagramApiMode(), capabilityId);
+  }
+
+  isCapabilitySupported(capabilityId: string): boolean {
+    return isCapabilitySupported(this.getInstagramApiMode(), capabilityId);
   }
 }

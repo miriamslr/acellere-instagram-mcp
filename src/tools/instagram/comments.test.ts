@@ -230,4 +230,16 @@ describe("ig_reply_to_comment message length validation", () => {
       server.callTool("ig_reply_to_comment", { comment_id: "c_1", message: "" })
     ).rejects.toThrow();
   });
+
+  it("ig_send_private_reply dispatches private DM message payload for comment", async () => {
+    await server.callTool("ig_send_private_reply", {
+      comment_id: "c_123",
+      message: "Thanks for reaching out! We sent you a DM.",
+    });
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("POST");
+    expect(call[1]).toBe("/123/messages");
+    expect(call[3].jsonBody.recipient.comment_id).toBe("c_123");
+    expect(call[3].jsonBody.message.text).toBe("Thanks for reaching out! We sent you a DM.");
+  });
 });

@@ -134,4 +134,390 @@ export function registerIgMessagingTools(server: McpServer, client: MetaClient):
       }
     }
   );
+
+  // ─── ig_send_media_message ───────────────────────────────────
+  server.registerTool(
+    "ig_send_media_message",
+    {
+      description:
+        "Send an Image, Video, Audio, or File direct message to a user via URL or reusable attachment_id. " +
+        "Requires recipient_id, attachment_type, and either media_url or attachment_id. Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
+        attachment_type: z.enum(["image", "video", "audio", "file"]).describe("Media type"),
+        media_url: z.string().url().optional().describe("Public HTTPS URL of the media file (JPEG, PNG, MP4, AAC)"),
+        attachment_id: z.string().optional().describe("Reusable attachment_id obtained from ig_upload_attachment"),
+        is_reusable: z.boolean().optional().default(true).describe("Save as reusable attachment for future sends"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, attachment_type, media_url, attachment_id, is_reusable }) => {
+      try {
+        if (!media_url && !attachment_id) {
+          return validationError("Provide either media_url or attachment_id to send a media message.");
+        }
+
+        const attachmentPayload: Record<string, unknown> = attachment_id
+          ? { attachment_id }
+          : { url: media_url, is_reusable };
+
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          message: {
+            attachment: {
+              type: attachment_type,
+              payload: attachmentPayload,
+            },
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send media message");
+      }
+    }
+  );
+
+  // ─── ig_send_quick_replies ───────────────────────────────────
+  server.registerTool(
+    "ig_send_quick_replies",
+    {
+      description:
+        "Send a text message with quick reply button options (up to 13 buttons) to guide the user's response in Instagram Direct. Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
+        text: z.string().min(1).max(1000).describe("Prompt text displayed above quick reply buttons"),
+        quick_replies: z
+          .array(
+            z.object({
+              title: z.string().min(1).max(20).describe("Button label (max 20 chars)"),
+              payload: z.string().min(1).max(1000).describe("Custom developer payload sent when clicked"),
+              image_url: z.string().url().optional().describe("Optional button icon image URL"),
+            })
+          )
+          .min(1)
+          .max(13)
+          .describe("Array of quick reply options (1 to 13 buttons)"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, text, quick_replies }) => {
+      try {
+        const formattedReplies = quick_replies.map((qr) => ({
+          content_type: "text",
+          title: qr.title,
+          payload: qr.payload,
+          image_url: qr.image_url,
+        }));
+
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          message: {
+            text,
+            quick_replies: formattedReplies,
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send quick replies");
+      }
+    }
+  );
+
+  // ─── ig_send_generic_template ────────────────────────────────
+  server.registerTool(
+    "ig_send_generic_template",
+    {
+      description:
+        "Send an interactive Generic Template card or carousel (up to 10 cards) with image, title, subtitle, and CTA buttons in Direct. Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
+        elements: z
+          .array(
+            z.object({
+              title: z.string().min(1).max(80).describe("Card title (max 80 chars)"),
+              subtitle: z.string().max(80).optional().describe("Card subtitle (max 80 chars)"),
+              image_url: z.string().url().optional().describe("Card image URL"),
+              buttons: z
+                .array(
+                  z.object({
+                    type: z.enum(["web_url", "postback"]).describe("Button type"),
+                    title: z.string().min(1).max(20).describe("Button label (max 20 chars)"),
+                    url: z.string().url().optional().describe("Destination URL for web_url button"),
+                    payload: z.string().optional().describe("Payload for postback button"),
+                  })
+                )
+                .max(3)
+                .optional()
+                .describe("Up to 3 CTA buttons per card"),
+            })
+          )
+          .min(1)
+          .max(10)
+          .describe("Array of cards (1 to 10 elements)"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, elements }) => {
+      try {
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          message: {
+            attachment: {
+              type: "template",
+              payload: {
+                template_type: "generic",
+                elements,
+              },
+            },
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send generic template");
+      }
+    }
+  );
+
+  // ─── ig_send_button_template ─────────────────────────────────
+  server.registerTool(
+    "ig_send_button_template",
+    {
+      description:
+        "Send a Button Template message (text prompt with up to 3 CTA buttons) in Instagram Direct. Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
+        text: z.string().min(1).max(640).describe("Message prompt text (max 640 chars)"),
+        buttons: z
+          .array(
+            z.object({
+              type: z.enum(["web_url", "postback"]).describe("Button type"),
+              title: z.string().min(1).max(20).describe("Button label (max 20 chars)"),
+              url: z.string().url().optional().describe("Destination URL for web_url"),
+              payload: z.string().optional().describe("Payload for postback button"),
+            })
+          )
+          .min(1)
+          .max(3)
+          .describe("Array of 1 to 3 buttons"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, text, buttons }) => {
+      try {
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          message: {
+            attachment: {
+              type: "template",
+              payload: {
+                template_type: "button",
+                text,
+                buttons,
+              },
+            },
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send button template");
+      }
+    }
+  );
+
+  // ─── ig_send_reaction ────────────────────────────────────────
+  server.registerTool(
+    "ig_send_reaction",
+    {
+      description: "React to a direct message with an emoji (e.g. ❤️, 👍, 😂, 😮, 😢, 🙏). Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the conversation partner"),
+        message_id: metaId.describe("Message ID to react to"),
+        reaction: z.string().min(1).describe("Emoji reaction character (e.g. '❤️')"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, message_id, reaction }) => {
+      try {
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          sender_action: "react",
+          reaction: {
+            message_id,
+            reaction,
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send reaction");
+      }
+    }
+  );
+
+  // ─── ig_delete_reaction ──────────────────────────────────────
+  server.registerTool(
+    "ig_delete_reaction",
+    {
+      description: "Remove an existing emoji reaction from a direct message. Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the conversation partner"),
+        message_id: metaId.describe("Message ID to unreact from"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, message_id }) => {
+      try {
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          sender_action: "unreact",
+          reaction: {
+            message_id,
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Delete reaction");
+      }
+    }
+  );
+
+  // ─── ig_send_sender_action ───────────────────────────────────
+  server.registerTool(
+    "ig_send_sender_action",
+    {
+      description: "Send typing indicator (typing_on/typing_off) or mark a conversation as seen (mark_seen). Write.",
+      inputSchema: {
+        recipient_id: z.string().describe("Instagram-scoped user ID of the recipient"),
+        sender_action: z
+          .enum(["mark_seen", "typing_on", "typing_off"])
+          .describe("Sender action to emit in the conversation"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ recipient_id, sender_action }) => {
+      try {
+        const jsonBody = {
+          recipient: { id: recipient_id },
+          sender_action,
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send sender action");
+      }
+    }
+  );
+
+  // ─── ig_get_user_profile_by_igsid ────────────────────────────
+  server.registerTool(
+    "ig_get_user_profile_by_igsid",
+    {
+      description:
+        "Get public profile information (name, profile picture, follower count, follow status) for an Instagram-Scoped ID (IGSID). Read-only.",
+      inputSchema: {
+        igsid: z.string().describe("Instagram-Scoped User ID"),
+        fields: z
+          .string()
+          .optional()
+          .default("name,profile_pic,follower_count,is_user_follow_business,is_business_follow_user")
+          .describe("Comma-separated fields to retrieve"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ igsid, fields }) => {
+      try {
+        const { data, rateLimit } = await client.ig("GET", `/${igsid}`, { fields });
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get user profile by IGSID");
+      }
+    }
+  );
+
+  // ─── ig_upload_attachment ────────────────────────────────────
+  server.registerTool(
+    "ig_upload_attachment",
+    {
+      description:
+        "Upload a media attachment to Meta's servers to obtain a reusable attachment_id for fast Direct Message delivery. Write.",
+      inputSchema: {
+        attachment_type: z.enum(["image", "video", "audio", "file"]).describe("Attachment type"),
+        url: z.string().url().describe("Public HTTPS URL of the file to upload and cache on Meta's servers"),
+        is_reusable: z.boolean().optional().default(true).describe("Whether to mark the attachment as reusable"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ attachment_type, url, is_reusable }) => {
+      try {
+        const jsonBody = {
+          message: {
+            attachment: {
+              type: attachment_type,
+              payload: {
+                url,
+                is_reusable,
+              },
+            },
+          },
+        };
+
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/message_attachments`,
+          undefined,
+          { jsonBody }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Upload message attachment");
+      }
+    }
+  );
 }

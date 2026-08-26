@@ -1039,4 +1039,29 @@ describe("ig_publish_video / _reel / _story error context", () => {
       expect(payload.container_id).toBe("container-X");
     });
   }
+
+  it("ig_get_content_publishing_limit queries rate limit quota", async () => {
+    const server = makeMockServer();
+    const client = {
+      igUserId: "1784140001",
+      ig: vi.fn(async () => ({
+        data: {
+          config: { quota_total: 100, quota_duration: 86400 },
+          quota_usage: 12,
+        },
+        rateLimit: undefined,
+      })),
+      ...makeMockCache(),
+    } as unknown as MetaClient;
+
+    registerIgPublishingTools(server as never, client);
+    const handler = server.tools.get("ig_get_content_publishing_limit")!;
+    const result = await handler({});
+    const payload = parsePayload(result);
+    expect(payload.quota_usage).toBe(12);
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("GET");
+    expect(call[1]).toBe("/1784140001/content_publishing_limit");
+  });
 });

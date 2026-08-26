@@ -196,4 +196,8 @@ export class AcellereMetaClient extends MetaClient {
     }
     return this.igUserId;
   }
+
+  override getInstagramApiMode(): InstagramApiMode {
+    return this.instagramApiMode;
+  }
 }

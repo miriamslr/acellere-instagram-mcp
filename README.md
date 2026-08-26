@@ -152,28 +152,40 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `meta_subscribe_webhook` | Subscribe to webhook notifications |
 | `meta_get_webhook_subscriptions` | List current webhook subscriptions |
 
-### Instagram — Publishing (6)
+### Instagram — Auth & Capabilities (3)
 
 | Tool | Description |
 |------|-------------|
-| `ig_publish_photo` | Publish a photo post (supports alt_text, collaborators) |
+| `ig_get_capabilities` | Query the full capability matrix for the active login mode (Facebook Login vs Instagram Login) |
+| `ig_get_connection_info` | Inspect sanitized connection status and user ID without exposing tokens |
+| `ig_bootstrap_discovery` | Discovers connected Facebook Pages and Instagram Business accounts (`/me/accounts` or `/me`) |
+
+### Instagram — Publishing & Limits (7)
+
+| Tool | Description |
+|------|-------------|
+| `ig_publish_photo` | Publish a photo post (supports alt_text, collaborators, user_tags, location_id) |
 | `ig_publish_video` | **[DEPRECATED]** Use `ig_publish_reel` — publishes as a Reel (legacy VIDEO media_type retired by Meta Nov 9, 2023; supports collaborators) |
 | `ig_publish_carousel` | Publish a carousel/album (2-10 items, supports alt_text per IMAGE item, collaborators) |
-| `ig_publish_reel` | Publish a Reel (supports collaborators) |
+| `ig_publish_reel` | Publish a Reel (supports collaborators, cover_url, thumb_offset, audio_name) |
 | `ig_publish_story` | Publish a Story (24hr) |
 | `ig_get_container_status` | Check media container processing status |
+| `ig_get_content_publishing_limit` | Check remaining 24-hour publishing quota and rolling window rate limits |
 
-### Instagram — Media (5)
+### Instagram — Media, Stories & Live (8)
 
 | Tool | Description |
 |------|-------------|
 | `ig_get_media_list` | List published media |
 | `ig_get_media` | Get media details |
+| `ig_get_media_children` | Get child media items from a carousel album |
+| `ig_get_stories` | Get active 24-hour Stories published by the account |
+| `ig_get_live_media` | List active live broadcast media |
 | `ig_delete_media` | Delete a media post (requires Facebook Login) |
 | `ig_get_media_insights` | Get media analytics (default views, reach — override `metric` per media type) |
 | `ig_toggle_comments` | Enable/disable comments on a post |
 
-### Instagram — Comments (7)
+### Instagram — Comments & Private Replies (8)
 
 | Tool | Description |
 |------|-------------|
@@ -182,10 +194,11 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_post_comment` | Post a comment |
 | `ig_get_replies` | Get replies to a comment |
 | `ig_reply_to_comment` | Reply to a comment |
+| `ig_send_private_reply` | Send a private Direct Message in response to a comment (7-day window) |
 | `ig_hide_comment` | Hide/unhide a comment |
 | `ig_delete_comment` | Delete a comment |
 
-### Instagram — Profile & Insights (5)
+### Instagram — Profile, Insights & Collaboration (6)
 
 | Tool | Description |
 |------|-------------|
@@ -194,6 +207,7 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_business_discovery` | Look up another business/creator account with 10 default public profile fields and strict validation |
 | `ig_get_collaboration_invites` | Get pending collaboration invites |
 | `ig_respond_collaboration_invite` | Accept/decline a collaboration invite by media_id |
+| `ig_get_collaborative_posts` | List published posts where account is an accepted co-author |
 
 ### Instagram — Business Discovery & Competitor Intelligence (9)
 
@@ -214,30 +228,94 @@ The server then listens on `http://127.0.0.1:3000/mcp`: `POST` to send messages,
 | `ig_run_competitor_collection` | Executa a rotina de coleta e atualização de snapshots para todas as contas ativas no banco, registrando auditoria da execução em `collection_runs` |
 | `ig_competitor_research` | Orquestrador de pesquisa de mercado que combina descoberta de perfil, coleta de mídias e carrosséis, métricas determinísticas, benchmark de líderes e histórico opcional em um dataset estruturado pronto para LLMs |
 
-### Instagram — Hashtags (4)
+### Instagram — Hashtags (5)
 
 | Tool | Description |
 |------|-------------|
-| `ig_search_hashtag` | Search hashtag by name |
+| `ig_search_hashtag` | Search hashtag by name (30-unique limit per 7 days) |
 | `ig_get_hashtag` | Get hashtag info |
 | `ig_get_hashtag_recent` | Get recent media for a hashtag |
 | `ig_get_hashtag_top` | Get top media for a hashtag |
+| `ig_get_recently_searched_hashtags` | Monitor recent searched hashtags in the rolling window |
 
-### Instagram — Mentions & Tags (2)
+### Instagram — Mentions & Tags (4)
 
 | Tool | Description |
 |------|-------------|
-| `ig_get_mentioned_comment` | Get details of a specific comment mentioning you (by comment_id from a mention webhook) |
-| `ig_get_tagged_media` | Get media you're tagged in |
+| `ig_get_mentioned_comment` | Get details of a comment where you were mentioned |
+| `ig_get_mentioned_media` | Get details of a caption mention post |
+| `ig_get_tagged_media` | Get media where the account is tagged |
+| `ig_reply_to_mention` | Post a reply comment to a mention |
 
-### Instagram — Messaging (4)
+### Instagram — Direct Messaging & Send API (13)
 
 | Tool | Description |
 |------|-------------|
 | `ig_get_conversations` | List DM conversations |
 | `ig_get_messages` | Get messages in a conversation |
-| `ig_send_message` | Send a DM (optional `messaging_type` = `RESPONSE`/`UPDATE`/`MESSAGE_TAG` and `tag` = `HUMAN_AGENT` for the 7-day human-agent window) |
 | `ig_get_message` | Get message details |
+| `ig_send_message` | Send text DM (supports `RESPONSE`, `UPDATE`, `MESSAGE_TAG` / `HUMAN_AGENT` 7-day window) |
+| `ig_send_media_message` | Send image, video, audio, or file attachment in DM |
+| `ig_send_quick_replies` | Send text prompt with interactive quick reply options |
+| `ig_send_generic_template` | Send rich cards and carousel templates with CTA buttons |
+| `ig_send_button_template` | Send button template in DM |
+| `ig_send_reaction` | React to a DM with an emoji |
+| `ig_delete_reaction` | Remove emoji reaction from a message |
+| `ig_send_sender_action` | Emit typing indicators (`typing_on`/`typing_off`) or mark seen |
+| `ig_get_user_profile_by_igsid` | Get public profile for an Instagram-Scoped ID |
+| `ig_upload_attachment` | Upload and pre-cache reusable media attachments |
+
+### Instagram — Messenger Profile & Welcome Automation (9)
+
+| Tool | Description |
+|------|-------------|
+| `ig_get_messenger_profile` | Query profile settings (Ice Breakers, Persistent Menu, Greeting) |
+| `ig_set_ice_breakers` | Configure FAQ prompt questions for new conversations |
+| `ig_delete_ice_breakers` | Delete Ice Breakers configuration |
+| `ig_set_persistent_menu` | Configure persistent menu CTAs in composer |
+| `ig_delete_persistent_menu` | Delete persistent menu |
+| `ig_list_welcome_message_flows` | List welcome automation flows |
+| `ig_get_welcome_message_flow` | Get welcome flow details |
+| `ig_set_welcome_message_flow` | Create/update welcome automation flow |
+| `ig_delete_welcome_message_flow` | Delete welcome automation flow |
+
+### Instagram — Webhooks & Subscriptions (3)
+
+| Tool | Description |
+|------|-------------|
+| `ig_get_subscribed_apps` | Get active webhook subscriptions for Page/Account |
+| `ig_subscribe_app` | Subscribe to webhook topics (messages, comments, mentions, insights) |
+| `ig_unsubscribe_app` | Unsubscribe from webhook notifications |
+
+### Instagram — Commerce & Product Tagging (7)
+
+| Tool | Description |
+|------|-------------|
+| `ig_get_available_catalogs` | List linked e-commerce product catalogs |
+| `ig_get_catalog_products` | Browse catalog products for shopping tags |
+| `ig_get_product_tags` | Get product tags on a media post |
+| `ig_create_product_tags` | Add or update shopping product tags on media |
+| `ig_delete_product_tags` | Remove product tags from media |
+| `ig_get_product_appeal` | Check appeal status for rejected products |
+| `ig_submit_product_appeal` | Submit appeal for product policy review |
+
+### Instagram — Branded Content & Partnership Ads (7)
+
+| Tool | Description |
+|------|-------------|
+| `ig_get_branded_content_ad_permissions` | Check ad boost permissions on branded media |
+| `ig_get_advertisable_media` | List media approved for Partnership Ads |
+| `ig_get_authorized_ad_accounts` | Get list of authorized brand partner ad accounts |
+| `ig_set_authorized_ad_account` | Authorize a brand partner to run Partnership Ads |
+| `ig_delete_authorized_ad_account` | Revoke partner ad authorization |
+| `ig_get_tag_approval_requests` | Get pending creator branded content tag requests |
+| `ig_update_tag_approval` | Approve or reject creator tag request |
+
+### Instagram — oEmbed (1)
+
+| Tool | Description |
+|------|-------------|
+| `ig_get_oembed` | Get official embed HTML and metadata for public Instagram posts |
 
 ### Threads — Publishing (9)
 

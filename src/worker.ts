@@ -4,6 +4,7 @@ import { AcellereMetaClient, type AcellereWriteMode, type InstagramApiMode } fro
 import { registerAll } from "./register-all.js";
 import { createMcpLogger } from "./utils/logger.js";
 import type { MetaConfig } from "./config.js";
+import { normalizeInstagramWebhook, verifyWebhookSignature } from "./services/webhook-normalizer.js";
 
 export const SERVER_VERSION = "8.0.0";
 
@@ -120,6 +121,7 @@ export default {
           endpoints: {
             health: "/health",
             mcp: "/mcp",
+            webhooks: "/webhooks/instagram",
           },
         }),
         {
@@ -127,6 +129,53 @@ export default {
           headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
         }
       );
+    }
+
+    // Instagram Webhook Endpoint
+    if (path === "/webhooks/instagram" || path === "/webhook") {
+      if (request.method === "GET") {
+        const mode = url.searchParams.get("hub.mode");
+        const token = url.searchParams.get("hub.verify_token");
+        const challenge = url.searchParams.get("hub.challenge");
+
+        // Verify token matches AUTH_TOKEN or verify_token if provided
+        const expectedToken = env.AUTH_TOKEN?.trim();
+        if (mode === "subscribe" && challenge) {
+          if (!expectedToken || token === expectedToken) {
+            return new Response(challenge, { status: 200, headers: CORS_HEADERS });
+          }
+        }
+        return new Response("Forbidden", { status: 403, headers: CORS_HEADERS });
+      }
+
+      if (request.method === "POST") {
+        const rawBody = await request.text();
+        const signature = request.headers.get("x-hub-signature-256");
+
+        if (env.META_APP_SECRET) {
+          const isValid = await verifyWebhookSignature(rawBody, signature, env.META_APP_SECRET);
+          if (!isValid) {
+            return new Response(
+              JSON.stringify({ error: "Invalid HMAC signature" }),
+              { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+            );
+          }
+        }
+
+        try {
+          const parsed = JSON.parse(rawBody);
+          const normalized = normalizeInstagramWebhook(parsed);
+          return new Response(
+            JSON.stringify({ status: "ok", received_events_count: normalized.length, events: normalized }),
+            { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+          );
+        } catch {
+          return new Response(
+            JSON.stringify({ error: "Invalid JSON payload" }),
+            { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+          );
+        }
+      }
     }
 
     // Protect MCP endpoint

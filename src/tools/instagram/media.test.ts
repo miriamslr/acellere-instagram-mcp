@@ -141,4 +141,25 @@ describe("ig_get_media rejects path-traversal media_id (#103)", () => {
     const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[1]).toBe("/17841405822304914_17889615324123");
   });
+
+  it("ig_get_media_children queries carousel children", async () => {
+    await server.callTool("ig_get_media_children", { media_id: "carousel_123" });
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("GET");
+    expect(call[1]).toBe("/carousel_123/children");
+  });
+
+  it("ig_get_stories queries stories endpoint", async () => {
+    await server.callTool("ig_get_stories", { limit: 10 });
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("GET");
+    expect(call[1]).toBe("/123/stories");
+  });
+
+  it("ig_get_live_media queries live_media endpoint", async () => {
+    await server.callTool("ig_get_live_media", {});
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("GET");
+    expect(call[1]).toBe("/123/live_media");
+  });
 });
