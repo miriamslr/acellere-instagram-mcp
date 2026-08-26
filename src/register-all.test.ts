@@ -55,6 +55,7 @@ describe("registerAll", () => {
       "ig_get_collaboration_invites",
       "ig_respond_collaboration_invite",
       "ig_get_business_media",
+      "ig_analyze_business",
       "ig_search_hashtag",
       "ig_get_hashtag",
       "ig_get_hashtag_recent",
