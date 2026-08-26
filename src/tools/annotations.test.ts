@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { MetaClient, MetaConfig } from "../services/meta-client.js";
+import { MetaClient } from "../services/meta-client.js";
+import type { MetaConfig } from "../config.js";
 import { makeMockServer } from "./test-utils.js";
 import { registerAll } from "../register-all.js";
 

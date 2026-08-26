@@ -800,7 +800,8 @@ describe("Instagram publish progress notifications", () => {
       { _meta: { progressToken: "tok-reel" }, sendNotification }
     );
     expect(sendNotification).toHaveBeenCalled();
-    const call = sendNotification.mock.calls[0][0] as { method: string; params: { progressToken: string } };
+    const calls = sendNotification.mock.calls as unknown[][];
+    const call = calls[0][0] as { method: string; params: { progressToken: string } };
     expect(call.method).toBe("notifications/progress");
     expect(call.params.progressToken).toBe("tok-reel");
   });
@@ -832,11 +833,12 @@ describe("Instagram publish progress notifications", () => {
     );
     // 3 child polls + 1 final carousel poll = 4 emissions on the shared token.
     expect(sendNotification).toHaveBeenCalledTimes(4);
-    const progressValues = sendNotification.mock.calls.map(
+    const calls = sendNotification.mock.calls as unknown[][];
+    const progressValues = calls.map(
       (call) => (call[0] as { params: { progress: number; progressToken: string } }).params.progress
     );
     expect(progressValues).toEqual([1, 2, 3, 4]);
-    const firstCall = sendNotification.mock.calls[0][0] as { params: { progressToken: string; total?: number } };
+    const firstCall = calls[0][0] as { params: { progressToken: string; total?: number } };
     expect(firstCall.params.progressToken).toBe("tok-carousel");
     expect(firstCall.params.total).toBeUndefined();
   });
@@ -1056,8 +1058,8 @@ describe("ig_publish_video / _reel / _story error context", () => {
 
     registerIgPublishingTools(server as never, client);
     const handler = server.tools.get("ig_get_content_publishing_limit")!;
-    const result = await handler({});
-    const payload = parsePayload(result);
+    const result = (await handler({})) as { content: { text: string }[] };
+    const payload = JSON.parse(result.content[0].text) as { quota_usage: number };
     expect(payload.quota_usage).toBe(12);
 
     const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
