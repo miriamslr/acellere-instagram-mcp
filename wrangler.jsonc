@@ -12,9 +12,7 @@
   },
   "kv_namespaces": [
     {
-      "binding": "KV_DEDUPLICATION",
-      "id": "acellere_deduplication_kv",
-      "preview_id": "acellere_deduplication_kv_preview"
+      "binding": "KV_DEDUPLICATION"
     }
   ],
   "vars": {
