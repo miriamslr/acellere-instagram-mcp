@@ -245,8 +245,15 @@ export function registerIgCompetitorResearchTools(
 
         // Build comparison overview items
         const comparisonOverview: CompetitorComparisonItem[] = accountsDetail.map((acc) => {
-          if (acc.status === "ok" && acc.analysis) {
-            return fromAnalysisReport(acc.analysis);
+          if (acc.status === "ok") {
+            if (acc.analysis) {
+              return fromAnalysisReport(acc.analysis);
+            }
+            return {
+              username: acc.username,
+              status: "error",
+              error_message: "Competitor research returned status ok without analysis data.",
+            };
           }
           return {
             username: acc.username,
