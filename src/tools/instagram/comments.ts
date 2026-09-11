@@ -171,4 +171,41 @@ export function registerIgCommentTools(server: McpServer, client: MetaClient): v
       }
     }
   );
+
+  // ─── ig_send_private_reply ───────────────────────────────────
+  server.registerTool(
+    "ig_send_private_reply",
+    {
+      description:
+        "Send a private Direct Message reply to a user's comment on your Instagram media post. " +
+        "Meta enforces a strict 7-day window from the comment creation time and allows only one private reply per comment. Write.",
+      inputSchema: {
+        comment_id: metaId.describe("Comment ID to send private reply to"),
+        message: z
+          .string()
+          .min(1)
+          .max(1000)
+          .describe("Private direct message text (max 1000 chars)"),
+      },
+      annotations: WRITE_TOOL,
+    },
+    async ({ comment_id, message }) => {
+      try {
+        const { data, rateLimit } = await client.ig(
+          "POST",
+          `/${client.igUserId}/messages`,
+          undefined,
+          {
+            jsonBody: {
+              recipient: { comment_id },
+              message: { text: message },
+            },
+          }
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Send private reply");
+      }
+    }
+  );
 }

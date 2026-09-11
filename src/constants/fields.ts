@@ -39,6 +39,15 @@ export const IG_BUSINESS_DISCOVERY_UNSUPPORTED_FIELDS = new Set([
 export const IG_MEDIA_FIELDS =
   "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count";
 
+export const IG_MEDIA_CHILDREN_FIELDS =
+  "id,media_type,media_url,permalink,timestamp";
+
+export const IG_STORY_FIELDS =
+  "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count";
+
+export const IG_LIVE_MEDIA_FIELDS =
+  "id,media_type,permalink,timestamp";
+
 // thumbnail_url is intentionally omitted — the Instagram Hashtag Search API
 // does not return it on hashtag media results, only on user-owned media.
 export const IG_HASHTAG_MEDIA_FIELDS =

@@ -168,4 +168,36 @@ export function registerIgProfileTools(server: McpServer, client: MetaClient): v
       }
     }
   );
+
+  // ─── ig_get_collaborative_posts ──────────────────────────────
+  server.registerTool(
+    "ig_get_collaborative_posts",
+    {
+      description: "List published collaborative posts where this account is an accepted collaborator. Read-only.",
+      inputSchema: {
+        limit: z.number().optional().describe("Number of results (default 25)"),
+        after: z.string().optional().describe("Pagination cursor for next page"),
+        before: z.string().optional().describe("Pagination cursor for previous page"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ limit, after, before }) => {
+      try {
+        const params = buildParams(
+          {
+            fields: "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count",
+          },
+          { limit, after, before }
+        );
+        const { data, rateLimit } = await client.ig(
+          "GET",
+          `/${client.igUserId}/collaborative_posts`,
+          params
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get collaborative posts");
+      }
+    }
+  );
 }

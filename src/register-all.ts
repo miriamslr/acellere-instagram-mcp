@@ -5,6 +5,7 @@ import { MetaClient } from "./services/meta-client.js";
 import { registerMetaAuthTools } from "./tools/meta/auth.js";
 
 // Instagram tools
+import { registerIgAuthTools } from "./tools/instagram/auth.js";
 import { registerIgPublishingTools } from "./tools/instagram/publishing.js";
 import { registerIgMediaTools } from "./tools/instagram/media.js";
 import { registerIgCommentTools } from "./tools/instagram/comments.js";
@@ -17,6 +18,11 @@ import { registerIgCompetitorResearchTools } from "./tools/instagram/competitor-
 import { registerIgHashtagTools } from "./tools/instagram/hashtags.js";
 import { registerIgMentionTools } from "./tools/instagram/mentions.js";
 import { registerIgMessagingTools } from "./tools/instagram/messaging.js";
+import { registerIgMessengerProfileTools } from "./tools/instagram/messenger-profile.js";
+import { registerIgWebhookTools } from "./tools/instagram/webhooks.js";
+import { registerIgCommerceTools } from "./tools/instagram/commerce.js";
+import { registerIgPartnershipTools } from "./tools/instagram/partnership.js";
+import { registerIgOembedTools } from "./tools/instagram/oembed.js";
 
 // Threads tools
 import { registerThreadsPublishingTools } from "./tools/threads/publishing.js";
@@ -33,6 +39,7 @@ import { registerPrompts } from "./prompts/index.js";
 
 export function registerAll(server: McpServer, client: MetaClient): void {
   registerMetaAuthTools(server, client);
+  registerIgAuthTools(server, client);
   registerIgPublishingTools(server, client);
   registerIgMediaTools(server, client);
   registerIgCommentTools(server, client);
@@ -45,6 +52,11 @@ export function registerAll(server: McpServer, client: MetaClient): void {
   registerIgHashtagTools(server, client);
   registerIgMentionTools(server, client);
   registerIgMessagingTools(server, client);
+  registerIgMessengerProfileTools(server, client);
+  registerIgWebhookTools(server, client);
+  registerIgCommerceTools(server, client);
+  registerIgPartnershipTools(server, client);
+  registerIgOembedTools(server, client);
   registerThreadsPublishingTools(server, client);
   registerThreadsMediaTools(server, client);
   registerThreadsReplyTools(server, client);

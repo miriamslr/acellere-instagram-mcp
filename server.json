@@ -60,7 +60,7 @@
         },
         {
           "name": "META_API_VERSION",
-          "description": "Optional Meta Graph API version for Instagram and Facebook endpoints (defaults to v25.0; format vMAJOR.MINOR; OAuth token endpoints are unversioned)",
+          "description": "Optional Meta Graph API version for Instagram and Facebook endpoints (defaults to v26.0; format vMAJOR.MINOR; OAuth token endpoints are unversioned)",
           "isRequired": false,
           "format": "string",
           "isSecret": false

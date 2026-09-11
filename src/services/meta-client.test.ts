@@ -13,6 +13,7 @@ import {
   HASHTAG_CACHE_TTL_MS,
   parseRetryAfter,
   computeBackoffDelay,
+  validateRuploadUri,
 } from "./meta-client.js";
 import { MetaConfig } from "../config.js";
 import { MetaApiError, MetaNetworkError, formatErrorResponse } from "../utils/errors.js";
@@ -21,6 +22,7 @@ function mockConfig(overrides: Partial<MetaConfig> = {}): MetaConfig {
   return {
     appId: "test-app-id",
     appSecret: "test-app-secret",
+    facebookPageId: "fb-page-id",
     instagramAccessToken: "ig-token",
     instagramUserId: "ig-user-id",
     threadsAccessToken: "threads-token",
@@ -440,12 +442,12 @@ describe("MetaClient API version override (#70)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("uses the documented defaults (v25.0 for Graph API, v1.0 for Threads)", () => {
-    expect(DEFAULT_META_API_VERSION).toBe("v25.0");
+  it("uses the documented defaults (v26.0 for Graph API, v1.0 for Threads)", () => {
+    expect(DEFAULT_META_API_VERSION).toBe("v26.0");
     expect(DEFAULT_THREADS_API_VERSION).toBe("v1.0");
   });
 
-  it("default constructor builds /v25.0/ Instagram URLs and /v1.0/ Threads URLs", async () => {
+  it("default constructor builds /v26.0/ Instagram URLs and /v1.0/ Threads URLs", async () => {
     const client = new MetaClient(mockConfig());
     await client.ig("GET", "/me");
     await client.threads("GET", "/me");
@@ -453,24 +455,24 @@ describe("MetaClient API version override (#70)", () => {
     const [igUrl] = fetchSpy.mock.calls[0] as [string, RequestInit];
     const [threadsUrl] = fetchSpy.mock.calls[1] as [string, RequestInit];
 
-    expect(igUrl).toContain("https://graph.instagram.com/v25.0/me");
+    expect(igUrl).toContain("https://graph.instagram.com/v26.0/me");
     expect(threadsUrl).toContain("https://graph.threads.net/v1.0/me");
   });
 
   it("metaApiVersion option overrides Instagram and Facebook URLs", async () => {
-    const client = new MetaClient(mockConfig(), { metaApiVersion: "v26.0" });
+    const client = new MetaClient(mockConfig(), { metaApiVersion: "v27.0" });
     await client.ig("GET", "/me");
     await client.meta("GET", "/me");
 
     const [igUrl] = fetchSpy.mock.calls[0] as [string, RequestInit];
     const [fbUrl] = fetchSpy.mock.calls[1] as [string, RequestInit];
 
-    expect(igUrl).toContain("https://graph.instagram.com/v26.0/me");
-    expect(fbUrl).toContain("https://graph.facebook.com/v26.0/me");
+    expect(igUrl).toContain("https://graph.instagram.com/v27.0/me");
+    expect(fbUrl).toContain("https://graph.facebook.com/v27.0/me");
   });
 
   it("metaApiVersion override does NOT leak into IG token endpoints", async () => {
-    const client = new MetaClient(mockConfig(), { metaApiVersion: "v26.0" });
+    const client = new MetaClient(mockConfig(), { metaApiVersion: "v27.0" });
     await client.igExchangeToken("short-tok");
     await client.igRefreshToken("long-tok");
 
@@ -490,7 +492,7 @@ describe("MetaClient API version override (#70)", () => {
     const [igUrl] = fetchSpy.mock.calls[1] as [string, RequestInit];
 
     expect(threadsUrl).toContain("https://graph.threads.net/v2.0/me");
-    expect(igUrl).toContain("https://graph.instagram.com/v25.0/me");
+    expect(igUrl).toContain("https://graph.instagram.com/v26.0/me");
   });
 
   it("threadsApiVersion override does NOT leak into Threads token endpoints", async () => {
@@ -1990,3 +1992,113 @@ describe("MetaClient structured logging (#62)", () => {
     }
   });
 });
+
+describe("MetaClient Graph API default version", () => {
+  it("defaults to v26.0", () => {
+    expect(DEFAULT_META_API_VERSION).toBe("v26.0");
+  });
+});
+
+describe("validateRuploadUri security validation", () => {
+  it("accepts valid rupload.facebook.com HTTPS URIs", () => {
+    const valid = "https://rupload.facebook.com/ig-api-upload/v26.0/1784140001";
+    const url = validateRuploadUri(valid);
+    expect(url.hostname).toBe("rupload.facebook.com");
+    expect(url.protocol).toBe("https:");
+  });
+
+  it("rejects non-URL strings", () => {
+    expect(() => validateRuploadUri("not-a-url")).toThrow("not a valid URL");
+  });
+
+  it("rejects HTTP protocol (insecure)", () => {
+    expect(() => validateRuploadUri("http://rupload.facebook.com/ig-api-upload/123")).toThrow(
+      'protocol must be "https:"'
+    );
+  });
+
+  it("rejects attacker domain (token exfiltration prevention)", () => {
+    expect(() => validateRuploadUri("https://attacker.example.com/steal-token")).toThrow(
+      'host must be strictly "rupload.facebook.com"'
+    );
+  });
+
+  it("rejects subdomain suffix attack (e.g. rupload.facebook.com.attacker.com)", () => {
+    expect(() =>
+      validateRuploadUri("https://rupload.facebook.com.attacker.com/upload")
+    ).toThrow('host must be strictly "rupload.facebook.com"');
+  });
+
+  it("rejects unauthorized subdomains (e.g. fake.rupload.facebook.com)", () => {
+    expect(() =>
+      validateRuploadUri("https://fake.rupload.facebook.com/upload")
+    ).toThrow('host must be strictly "rupload.facebook.com"');
+  });
+
+  it("rejects URLs with userinfo", () => {
+    expect(() =>
+      validateRuploadUri("https://user:password@rupload.facebook.com/ig-api-upload/123")
+    ).toThrow("must not contain userinfo");
+  });
+
+  it("rejects non-standard ports", () => {
+    expect(() =>
+      validateRuploadUri("https://rupload.facebook.com:8443/ig-api-upload/123")
+    ).toThrow("must be default HTTPS port 443");
+  });
+});
+
+describe("MetaClient.uploadResumableBinary", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("successfully uploads binary to rupload.facebook.com with correct headers and credentials", async () => {
+    let capturedInit: RequestInit | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedInit = init;
+      return new Response(JSON.stringify({ success: true, id: "session_123" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const client = new MetaClient(mockConfig());
+    const dummyBody = new Uint8Array([1, 2, 3, 4, 5]);
+
+    const result = await client.uploadResumableBinary({
+      uploadUri: "https://rupload.facebook.com/ig-api-upload/v26.0/1784140001",
+      body: dummyBody as unknown as BodyInit,
+      offset: 0,
+      fileSize: 5,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.http_status).toBe(200);
+    expect(result.bytes_uploaded).toBe(5);
+    expect(capturedInit).toBeDefined();
+    expect(capturedInit?.method).toBe("POST");
+    expect(capturedInit?.redirect).toBe("error");
+    const headers = capturedInit?.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("OAuth ig-token");
+    expect(headers.offset).toBe("0");
+    expect(headers.file_size).toBe("5");
+    expect(headers["X-Entity-Length"]).toBe("5");
+  });
+
+  it("rejects invalid upload URIs before making any network call", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const client = new MetaClient(mockConfig());
+
+    await expect(
+      client.uploadResumableBinary({
+        uploadUri: "https://evil.com/upload",
+        body: new Uint8Array([1, 2]),
+        fileSize: 2,
+      })
+    ).rejects.toThrow('host must be strictly "rupload.facebook.com"');
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+

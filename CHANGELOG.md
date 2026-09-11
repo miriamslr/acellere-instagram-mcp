@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Strict Memory Safety Preflight for Base64 Video Uploads** — `decodeVideoBase64Preflight` now estimates decoded payload size directly from string length before invoking `atob()`, preventing out-of-memory errors on large payloads (> 8 MB) and guiding clients to use HTTPS URL streaming.
+- **Webhook Credential Sanitization** — Added automated secret scrubbing (`sanitizeWebhookEvent`) across all webhook events dispatched to queues, ensuring `access_token`, `AUTH_TOKEN`, `INSTAGRAM_ACCESS_TOKEN`, `META_APP_SECRET`, and Authorization headers are stripped.
+
+### Fixed
+- **Resumable Upload Range Semantics** — For `video_url`, offset requests now require HTTP 206 Partial Content, strictly parse `Content-Range: bytes START-END/TOTAL`, validate `START === offset`, send the total file size to Meta, and reject origins returning HTTP 200. For `video_base64`, sliced buffers from `offset` are streamed while total file size is preserved.
+- **Strong Webhook Idempotency via Cloudflare Durable Object** — Introduced `InstagramWebhookDeduplicatorDO` providing atomic check-and-set leasing with failure rollback, ensuring webhook retries succeed upon network failure while eliminating duplicate processing across distributed Worker instances.
+- **Default API Mode Parity** — Unified `INSTAGRAM_API_MODE` default to `"facebook-login"` across CLI, Worker, and local HTTP transports for uniform capability support.
 - **`formatErrorResponse` now sanitizes the user-facing `message`, not just `raw`** — the error payload returned to MCP clients built `message` from the raw error string without scrubbing, while the sibling `raw` field (and `toMcpResourceError`) ran the same string through `sanitizeRaw`. Because a `MetaApiError` message embeds `Meta API ${method} ${path} (${status}): ${detail}` where `detail` falls back to the raw HTTP response body, an atypical gateway/proxy 5xx echoing the request query string could surface an `access_token` / `client_secret` / `input_token` to the client unredacted. `message` is now passed through `sanitizeRaw`, closing the asymmetry. `sanitizeRaw`'s query-param regex was also widened from `+` to `*` so an empty-value secret param (e.g. `access_token=`) is scrubbed, matching the JSON-form regex.
 
 ### Fixed

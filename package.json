@@ -32,7 +32,7 @@
     "deploy": "wrangler deploy",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
-    "test": "vitest run",
+    "test": "vitest run --fileParallelism=false",
     "test:watch": "vitest",
     "prepublishOnly": "node scripts/check-versions.mjs && npm run build"
   },

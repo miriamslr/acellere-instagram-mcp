@@ -6,6 +6,8 @@ import {
   type HttpMethod,
   type MetaClientOptions,
   type RequestOptions,
+  type ResumableUploadBinaryOptions,
+  type ResumableUploadBinaryResult,
 } from "./meta-client.js";
 
 export type AcellereWriteMode = "read-only" | "write";
@@ -66,7 +68,7 @@ function parseAllowDestructive(explicit?: boolean): boolean {
 
 function parseInstagramApiMode(explicit?: InstagramApiMode): InstagramApiMode {
   if (explicit) return explicit;
-  const raw = (process.env.INSTAGRAM_API_MODE ?? "instagram-login").trim().toLowerCase();
+  const raw = (process.env.INSTAGRAM_API_MODE ?? "facebook-login").trim().toLowerCase();
   if (raw === "instagram-login" || raw === "facebook-login") return raw;
   throw new Error(
     `INSTAGRAM_API_MODE must be "instagram-login" or "facebook-login" (got "${raw}").`
@@ -148,8 +150,22 @@ export class AcellereMetaClient extends MetaClient {
 
   override async igExchangeToken(shortToken: string): Promise<ClientResponse> {
     if (this.instagramApiMode === "facebook-login") {
-      throw new Error(
-        "Instagram token exchange via graph.instagram.com is only available with INSTAGRAM_API_MODE=instagram-login. Use the Facebook Login long-lived user/page token flow instead."
+      const internals = this as unknown as MetaClientInternals;
+      if (!internals.config.appId || !internals.config.appSecret) {
+        throw new Error("META_APP_ID and META_APP_SECRET are required for Facebook token exchange.");
+      }
+      return internals.request.call(
+        this,
+        internals.fbBase,
+        "",
+        "GET",
+        "/oauth/access_token",
+        {
+          grant_type: "fb_exchange_token",
+          client_id: internals.config.appId,
+          client_secret: internals.config.appSecret,
+          fb_exchange_token: shortToken,
+        }
       );
     }
     return super.igExchangeToken(shortToken);
@@ -184,6 +200,13 @@ export class AcellereMetaClient extends MetaClient {
     return super.meta(method, path, params, options);
   }
 
+  override async uploadResumableBinary(
+    options: ResumableUploadBinaryOptions
+  ): Promise<ResumableUploadBinaryResult> {
+    assertAcellereWriteAllowed("POST", this.safety);
+    return super.uploadResumableBinary(options);
+  }
+
   override get igConversationsTargetId(): string {
     if (this.instagramApiMode === "facebook-login") {
       const internals = this as unknown as MetaClientInternals;
@@ -195,5 +218,9 @@ export class AcellereMetaClient extends MetaClient {
       return internals.config.facebookPageId;
     }
     return this.igUserId;
+  }
+
+  override getInstagramApiMode(): InstagramApiMode {
+    return this.instagramApiMode;
   }
 }

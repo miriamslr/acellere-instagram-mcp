@@ -468,4 +468,215 @@ describe("ig_get_conversations mode-aware routing with AcellereMetaClient", () =
     );
     expect(igSpy).not.toHaveBeenCalled();
   });
+
+  it("ig_send_media_message dispatches correct attachment payload", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient({
+      ig: vi.fn(async () => ({
+        data: { recipient_id: "user_456", message_id: "m_123" },
+        rateLimit: undefined,
+      })),
+    });
+    registerIgMessagingTools(server as never, client);
+
+    const result = (await server.callTool("ig_send_media_message", {
+      recipient_id: "user_456",
+      attachment_type: "image",
+      media_url: "https://example.com/img.jpg",
+    })) as { content: { text: string }[] };
+
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.message_id).toBe("m_123");
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[3].jsonBody.message.attachment.type).toBe("image");
+    expect(call[3].jsonBody.message.attachment.payload.url).toBe("https://example.com/img.jpg");
+  });
+
+  it("ig_send_quick_replies sends text with quick reply choices", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient({
+      ig: vi.fn(async () => ({
+        data: { recipient_id: "user_456", message_id: "m_qr" },
+        rateLimit: undefined,
+      })),
+    });
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_quick_replies", {
+      recipient_id: "user_456",
+      text: "Choose an option:",
+      quick_replies: [
+        { content_type: "text", title: "Pricing", payload: "PAYLOAD_PRICING" },
+        { content_type: "user_phone_number", title: "Send Phone", payload: "PHONE_PAYLOAD" },
+        { content_type: "user_email", title: "Send Email", payload: "EMAIL_PAYLOAD" },
+      ],
+    });
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[3].jsonBody.message.quick_replies).toHaveLength(3);
+    expect(call[3].jsonBody.message.quick_replies[0]).toEqual({
+      content_type: "text",
+      title: "Pricing",
+      payload: "PAYLOAD_PRICING",
+    });
+    expect(call[3].jsonBody.message.quick_replies[1]).toEqual({
+      content_type: "user_phone_number",
+      title: "Send Phone",
+      payload: "PHONE_PAYLOAD",
+    });
+    expect(call[3].jsonBody.message.quick_replies[2]).toEqual({
+      content_type: "user_email",
+      title: "Send Email",
+      payload: "EMAIL_PAYLOAD",
+    });
+  });
+
+  it("ig_send_generic_template supports default_action on elements", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient({
+      ig: vi.fn(async () => ({
+        data: { recipient_id: "user_456", message_id: "m_gen" },
+        rateLimit: undefined,
+      })),
+    });
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_generic_template", {
+      recipient_id: "user_456",
+      elements: [
+        {
+          title: "Acellere AI Platform",
+          subtitle: "Enterprise Marketing Automation",
+          image_url: "https://example.com/banner.png",
+          default_action: {
+            type: "web_url",
+            url: "https://acellere.ai/dashboard",
+            webview_height_ratio: "tall",
+          },
+          buttons: [
+            {
+              type: "web_url",
+              title: "Explore",
+              url: "https://acellere.ai/explore",
+            },
+          ],
+        },
+      ],
+    });
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    const element = call[3].jsonBody.message.attachment.payload.elements[0];
+    expect(element.default_action).toEqual({
+      type: "web_url",
+      url: "https://acellere.ai/dashboard",
+      webview_height_ratio: "tall",
+    });
+  });
+
+  it("ig_send_sticker sends like_heart attachment", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient();
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_sticker", {
+      recipient_id: "user_456",
+      sticker_type: "like_heart",
+    });
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      message: {
+        attachment: {
+          type: "like_heart",
+        },
+      },
+    });
+  });
+
+  it("ig_send_published_post sends MEDIA_SHARE attachment", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient();
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_published_post", {
+      recipient_id: "user_456",
+      media_id: "17891234567890",
+    });
+
+    const call = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      message: {
+        attachment: {
+          type: "MEDIA_SHARE",
+          payload: {
+            id: "17891234567890",
+          },
+        },
+      },
+    });
+  });
+
+  it("ig_send_reaction and ig_delete_reaction dispatch official Meta reaction payloads", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient({
+      ig: vi.fn(async () => ({
+        data: { success: true },
+        rateLimit: undefined,
+      })),
+    });
+    registerIgMessagingTools(server as never, client);
+
+    await server.callTool("ig_send_reaction", {
+      recipient_id: "user_456",
+      message_id: "mid_999",
+      reaction: "love",
+    });
+
+    const reactCall = (client.ig as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(reactCall[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      sender_action: "react",
+      payload: {
+        message_id: "mid_999",
+        reaction: "love",
+      },
+    });
+
+    await server.callTool("ig_delete_reaction", {
+      recipient_id: "user_456",
+      message_id: "mid_999",
+    });
+
+    const unreactCall = (client.ig as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(unreactCall[3].jsonBody).toEqual({
+      recipient: { id: "user_456" },
+      sender_action: "unreact",
+      payload: {
+        message_id: "mid_999",
+      },
+    });
+  });
+
+  it("ig_upload_attachment sends attachment registration", async () => {
+    const server = makeMockServer();
+    const client = makeMockClient({
+      ig: vi.fn(async () => ({
+        data: { attachment_id: "att_123456" },
+        rateLimit: undefined,
+      })),
+    });
+    registerIgMessagingTools(server as never, client);
+
+    const result = (await server.callTool("ig_upload_attachment", {
+      attachment_type: "image",
+      url: "https://example.com/asset.png",
+      is_reusable: true,
+    })) as { content: { text: string }[] };
+
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.attachment_id).toBe("att_123456");
+  });
 });

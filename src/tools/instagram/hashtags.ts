@@ -126,4 +126,32 @@ export function registerIgHashtagTools(server: McpServer, client: MetaClient): v
       }
     }
   );
+
+  // ─── ig_get_recently_searched_hashtags ───────────────────────
+  server.registerTool(
+    "ig_get_recently_searched_hashtags",
+    {
+      description:
+        "Get list of hashtags searched by the account in the current 7-day rolling window. " +
+        "Allows monitoring the 30-unique-hashtags quota. Requires Facebook Login. Read-only.",
+      inputSchema: {
+        limit: z.number().optional().describe("Number of results"),
+      },
+      annotations: READ_ONLY_TOOL,
+    },
+    async ({ limit }) => {
+      try {
+        client.requireInstagramCapability("hashtags.recentlySearched");
+        const params = buildParams({}, { limit });
+        const { data, rateLimit } = await client.ig(
+          "GET",
+          `/${client.igUserId}/recently_searched_hashtags`,
+          params
+        );
+        return formatResponse(data, rateLimit);
+      } catch (error) {
+        return formatErrorResponse(error, "Get recently searched hashtags");
+      }
+    }
+  );
 }
