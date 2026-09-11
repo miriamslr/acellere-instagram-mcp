@@ -82,6 +82,12 @@ export interface RankedPostSummary {
   public_engagement_rate: number;
 }
 
+export type PostingFrequencyStatus =
+  | "available"
+  | "insufficient_posts"
+  | "insufficient_valid_timestamps"
+  | "insufficient_observation_window";
+
 export interface CompetitorAnalysisReport {
   [key: string]: unknown;
   account: {
@@ -102,8 +108,9 @@ export interface CompetitorAnalysisReport {
       end: string | null;
       duration_days: number;
     };
-    posts_per_week: number;
-    average_posting_interval_hours: number;
+    posts_per_week: number | null;
+    posting_frequency_status: PostingFrequencyStatus;
+    average_posting_interval_hours: number | null;
   };
   metrics: {
     likes: MetricSummary;
@@ -153,6 +160,10 @@ const HOUR_SLOTS = [
   { key: "afternoon", label: "12:00 - 17:59 (Afternoon)", start: 12, end: 17 },
   { key: "evening", label: "18:00 - 23:59 (Evening)", start: 18, end: 23 },
 ];
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+const MIN_FREQUENCY_SAMPLE_POSTS = 3;
+const MIN_FREQUENCY_WINDOW_MS = 3 * DAY_MS;
 
 function summarizeNumbers(arr: number[]): MetricSummary {
   if (arr.length === 0) {
@@ -224,8 +235,12 @@ export function analyzeCompetitorMedia(
   let startIso: string | null = null;
   let endIso: string | null = null;
   let durationDays = 0;
-  let postsPerWeek = 0;
-  let avgIntervalHours = 0;
+  let postsPerWeek: number | null = null;
+  let postingFrequencyStatus: PostingFrequencyStatus =
+    postsAnalyzed >= MIN_FREQUENCY_SAMPLE_POSTS && timestamps.length < MIN_FREQUENCY_SAMPLE_POSTS
+      ? "insufficient_valid_timestamps"
+      : "insufficient_posts";
+  let avgIntervalHours: number | null = null;
 
   const firstTimestamp = timestamps[0];
   const lastTimestamp = timestamps[timestamps.length - 1];
@@ -233,10 +248,9 @@ export function analyzeCompetitorMedia(
   if (firstTimestamp !== undefined && lastTimestamp !== undefined) {
     startIso = new Date(firstTimestamp).toISOString();
     endIso = new Date(lastTimestamp).toISOString();
-    const diffMs = Math.max(1000, lastTimestamp - firstTimestamp);
-    durationDays = Number((diffMs / (1000 * 60 * 60 * 24)).toFixed(2));
-    const effectiveDays = Math.max(1, durationDays);
-    postsPerWeek = Number(((postsAnalyzed / effectiveDays) * 7).toFixed(2));
+    const observedSpanMs = Math.max(0, lastTimestamp - firstTimestamp);
+    const displaySpanMs = Math.max(1000, observedSpanMs);
+    durationDays = Number((displaySpanMs / DAY_MS).toFixed(2));
 
     if (timestamps.length > 1) {
       const intervals: number[] = [];
@@ -248,6 +262,19 @@ export function analyzeCompetitorMedia(
         }
       }
       avgIntervalHours = calculateMean(intervals);
+    }
+
+    if (postsAnalyzed >= MIN_FREQUENCY_SAMPLE_POSTS && timestamps.length < MIN_FREQUENCY_SAMPLE_POSTS) {
+      postingFrequencyStatus = "insufficient_valid_timestamps";
+    } else if (timestamps.length < MIN_FREQUENCY_SAMPLE_POSTS) {
+      postingFrequencyStatus = "insufficient_posts";
+    } else if (observedSpanMs < MIN_FREQUENCY_WINDOW_MS) {
+      postingFrequencyStatus = "insufficient_observation_window";
+    } else {
+      const observedIntervals = timestamps.length - 1;
+      const observedSpanDays = observedSpanMs / DAY_MS;
+      postsPerWeek = Number(((observedIntervals / observedSpanDays) * 7).toFixed(2));
+      postingFrequencyStatus = "available";
     }
   }
 
@@ -437,6 +464,7 @@ export function analyzeCompetitorMedia(
         duration_days: durationDays,
       },
       posts_per_week: postsPerWeek,
+      posting_frequency_status: postingFrequencyStatus,
       average_posting_interval_hours: avgIntervalHours,
     },
     metrics: {

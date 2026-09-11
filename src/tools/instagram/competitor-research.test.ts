@@ -240,6 +240,8 @@ describe("ig_competitor_research tool", () => {
     expect(payload.research_metadata.accounts_failed).toBe(1);
 
     expect(payload.accounts_detail[0].status).toBe("ok");
+    expect(payload.benchmark_summary.accounts_overview[0].posting_frequency_status).toBeDefined();
+    expect(payload.accounts_detail[0].analysis.sample.posting_frequency_status).toBeDefined();
     expect(payload.accounts_detail[1].status).toBe("not_found");
     expect(payload.benchmark_summary.accounts_overview[1].status).toBe("not_found");
     expect(payload.benchmark_summary.accounts_overview[1]).not.toHaveProperty("followers_count");
