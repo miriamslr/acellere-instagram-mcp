@@ -47,7 +47,7 @@ export interface ResolvedActiveInstagramConnection {
   scopes: string[];
 }
 
-export interface SafeActiveInstagramConnectionStatus {
+export interface SafeActiveInstagramConnectionStatus extends Record<string, unknown> {
   connected: boolean;
   source: ActiveConnectionSource;
   login_mode: InstagramApiMode;
@@ -99,7 +99,7 @@ function bytesToBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function base64UrlToBytes(value: string): Uint8Array {
+function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (value.length % 4)) % 4);
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
